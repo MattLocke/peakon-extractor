@@ -1,2 +1,4 @@
 .env
 local_python_version.md
+.DS_Store
+src/.DS_Store
