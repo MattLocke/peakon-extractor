@@ -1,0 +1,38 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  ingestor:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - mongo
+
+  api:
+    build: .
+    restart: unless-stopped
+    command: ["uvicorn", "peakon_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mongo
+
+  web:
+    build: ./web
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE=http://localhost:8000
+
+volumes:
+  mongo_data:
