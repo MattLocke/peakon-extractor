@@ -36,6 +36,11 @@ const grade = ref("");
 const impact = ref("");
 const timeFrom = ref("");
 const timeTo = ref("");
+const ANON_EMAIL = "user@pax8.com";
+const managerOptions = ref([]);
+const managerLoading = ref(false);
+const managerCache = ref(new Map());
+let managerRequestId = 0;
 
 const hasPrev = computed(() => skip.value > 0);
 const hasNext = computed(() => skip.value + limit.value < total.value);
@@ -87,22 +92,32 @@ async function load() {
     items.value = payload.items || [];
     total.value = payload.total || 0;
     uniqueEmployees.value = payload.unique_employees || 0;
+    if (activeView.value === "answers_export") {
+      updateManagerOptions();
+    } else {
+      managerOptions.value = [];
+      managerLoading.value = false;
+    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
     items.value = [];
     total.value = 0;
     uniqueEmployees.value = 0;
+    managerOptions.value = [];
+    managerLoading.value = false;
   } finally {
     loading.value = false;
   }
 }
 
-async function fetchEmployee(employeeIdValue) {
+async function fetchEmployeeCached(employeeIdValue, { silent = false } = {}) {
   if (!employeeIdValue) return null;
   if (employeeCache.value.has(employeeIdValue)) {
     return employeeCache.value.get(employeeIdValue);
   }
-  hoverLoading.value = true;
+  if (!silent) {
+    hoverLoading.value = true;
+  }
   employeeErrors.value.delete(employeeIdValue);
   try {
     const res = await fetch(`${API_BASE}/employees/${employeeIdValue}`);
@@ -121,14 +136,16 @@ async function fetchEmployee(employeeIdValue) {
     );
     return null;
   } finally {
-    hoverLoading.value = false;
+    if (!silent) {
+      hoverLoading.value = false;
+    }
   }
 }
 
 async function onEmailHover(employeeIdValue) {
   if (!employeeIdValue) return;
   hoverEmployeeId.value = String(employeeIdValue);
-  await fetchEmployee(employeeIdValue);
+  await fetchEmployeeCached(employeeIdValue);
 }
 
 function employeeRecord(employeeIdValue) {
@@ -156,6 +173,56 @@ function employeeManagerId(employeeIdValue) {
     "—"
   );
 }
+
+function displayEmail() {
+  return ANON_EMAIL;
+}
+
+async function updateManagerOptions() {
+  if (activeView.value !== "answers_export") {
+    managerOptions.value = [];
+    managerLoading.value = false;
+    return;
+  }
+  const requestId = ++managerRequestId;
+  managerLoading.value = true;
+  try {
+    const params = new URLSearchParams();
+    if (search.value.trim()) params.set("search", search.value.trim());
+    if (employeeId.value.trim()) params.set("employee_id", employeeId.value.trim());
+    if (questionId.value.trim()) params.set("question_id", questionId.value.trim());
+    if (minScore.value.trim()) params.set("min_score", minScore.value.trim());
+    if (maxScore.value.trim()) params.set("max_score", maxScore.value.trim());
+    if (answeredFrom.value.trim()) params.set("answered_from", answeredFrom.value.trim());
+    if (answeredTo.value.trim()) params.set("answered_to", answeredTo.value.trim());
+    if (hasComment.value) params.set("has_comment", hasComment.value);
+    if (department.value.trim()) params.set("department", department.value.trim());
+    if (subDepartment.value.trim()) params.set("sub_department", subDepartment.value.trim());
+    const cacheKey = params.toString();
+    if (managerCache.value.has(cacheKey)) {
+      managerOptions.value = managerCache.value.get(cacheKey);
+      return;
+    }
+    const res = await fetch(`${API_BASE}/answers_export/managers?${cacheKey}`);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+    const payload = await res.json();
+    if (requestId !== managerRequestId) {
+      return;
+    }
+    managerOptions.value = payload.items || [];
+    managerCache.value.set(cacheKey, managerOptions.value);
+  } catch (err) {
+    managerOptions.value = [];
+  } finally {
+    if (requestId === managerRequestId) {
+      managerLoading.value = false;
+    }
+  }
+}
+
 
 function resetAndLoad() {
   skip.value = 0;
@@ -259,8 +326,19 @@ onMounted(() => load());
           <input v-model="subDepartment" placeholder="Service Delivery" />
         </label>
         <label>
-          Manager ID
-          <input v-model="managerId" placeholder="29375652" />
+          Manager
+          <select v-model="managerId">
+            <option value="">Any</option>
+            <option v-if="managerLoading" disabled>Loading managers...</option>
+            <option v-else-if="managerOptions.length === 0" disabled>No managers on page</option>
+            <option
+              v-for="manager in managerOptions"
+              :key="manager.id"
+              :value="manager.id"
+            >
+              {{ manager.label }} ({{ manager.count ?? 0 }})
+            </option>
+          </select>
         </label>
       </div>
 
@@ -313,7 +391,7 @@ onMounted(() => load());
               <div class="id">Answer {{ item?.attributes?.answerId || item._id }}</div>
               <div class="meta">
                 <span class="email" @mouseenter="onEmailHover(item?.attributes?.employeeId)">
-                  {{ item?.attributes?.accountEmail || "Unknown email" }}
+                  {{ displayEmail() }}
                 </span>
                 <div class="popover">
                   <div
