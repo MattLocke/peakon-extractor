@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
 from fastapi import FastAPI, Query
@@ -425,6 +425,48 @@ def list_scores_by_driver(
     end = _validate_iso(time_to)
     query.update(_iso_range("attributes.scores.time", start, end))
     return _list_collection("scores_by_driver", limit=limit, skip=skip, filter_query=query)
+
+
+@app.get("/employees/facets")
+def employee_facets() -> Dict[str, List[str]]:
+    db = get_db()
+    departments = sorted(
+        [
+            value
+            for value in db.employees.distinct("attributes.Department")
+            if value is not None and str(value).strip() != ""
+        ]
+    )
+    departments_alt = sorted(
+        [
+            value
+            for value in db.employees.distinct("attributes.department")
+            if value is not None and str(value).strip() != ""
+        ]
+    )
+    sub_departments = sorted(
+        [
+            value
+            for value in db.employees.distinct("attributes.Sub-Department")
+            if value is not None and str(value).strip() != ""
+        ]
+    )
+    sub_departments_alt = sorted(
+        [
+            value
+            for value in db.employees.distinct("attributes.sub_department")
+            if value is not None and str(value).strip() != ""
+        ]
+    )
+
+    department_values = sorted({str(v).strip() for v in (departments + departments_alt) if str(v).strip()})
+    sub_department_values = sorted(
+        {str(v).strip() for v in (sub_departments + sub_departments_alt) if str(v).strip()}
+    )
+    return {
+        "departments": department_values,
+        "sub_departments": sub_department_values,
+    }
 
 
 @app.get("/employees/{employee_id}")

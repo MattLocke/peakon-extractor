@@ -12,6 +12,8 @@ class EmployeeNode:
     name: str
     email: Optional[str]
     department: Optional[str]
+    sub_department: Optional[str]
+    country: Optional[str]
     title: Optional[str]
     manager_id: Optional[str]
 
@@ -81,6 +83,8 @@ def _coerce_employee(employee: Dict[str, Any]) -> EmployeeNode:
         name=_employee_name(attrs, node_id),
         email=_attr(attrs, ["Email", "email", "accountEmail"]),
         department=_attr(attrs, ["Department", "department"]),
+        sub_department=_attr(attrs, ["Sub-Department", "sub_department", "sub-department"]),
+        country=_attr(attrs, ["Country", "country"]),
         title=_attr(attrs, ["Title", "title", "Job title", "job_title"]),
         manager_id=_manager_id(employee),
     )
@@ -179,6 +183,8 @@ def build_org_map_payload(employees: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "label": node.name,
                 "email": node.email,
                 "department": node.department,
+                "subDepartment": node.sub_department,
+                "country": node.country,
                 "title": node.title,
                 "managerId": node.manager_id,
                 "parentId": parent_by_id.get(node_id),

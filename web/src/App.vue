@@ -41,11 +41,14 @@ const ANON_EMAIL = "user@pax8.com";
 const managerOptions = ref([]);
 const managerLoading = ref(false);
 const managerCache = ref(new Map());
+const departmentOptions = ref([]);
+const subDepartmentOptions = ref([]);
 const orgMap = ref({ nodes: [], edges: [], stats: {}, rootId: null });
 const orgMapSearch = ref("");
 const orgMapDepartment = ref("");
 const orgMapManagerFocus = ref("");
 const orgLayoutMode = ref("hierarchy");
+const orgClusterBy = ref("department");
 const orgMapZoom = ref(1);
 const orgPanX = ref(0);
 const orgPanY = ref(0);
@@ -78,7 +81,7 @@ const filteredOrgNodes = computed(() => {
   const q = orgMapSearch.value.trim().toLowerCase();
   if (!q) return orgMap.value.nodes;
   return orgMap.value.nodes.filter((node) => {
-    return [node.label, node.id, node.email, node.department, node.title]
+    return [node.label, node.id, node.email, node.department, node.subDepartment, node.country, node.title]
       .filter(Boolean)
       .some((v) => String(v).toLowerCase().includes(q));
   });
@@ -99,10 +102,18 @@ function groupColor(groupKey) {
   return palette[hashSeed(groupKey) % palette.length];
 }
 
+function clusterKeyForNode(node) {
+  if (orgClusterBy.value === "subDepartment") return node.subDepartment || node.department || "Unassigned";
+  if (orgClusterBy.value === "manager") return node.managerId || "No manager";
+  if (orgClusterBy.value === "country") return node.country || "Unknown country";
+  if (orgClusterBy.value === "title") return node.title || "No title";
+  return node.department || "Unassigned";
+}
+
 const clusterNodes = computed(() => {
   const groups = new Map();
   for (const node of filteredOrgNodes.value) {
-    const key = node.department || "Unassigned";
+    const key = clusterKeyForNode(node);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(node);
   }
@@ -177,7 +188,7 @@ function showOrgLabels() {
 
 function orgNodeFill(node) {
   if (selectedOrgNodeId.value === node.id) return "#22c55e";
-  if (orgLayoutMode.value === "cluster") return node.groupColor || groupColor(node.department || "Unassigned");
+  if (orgLayoutMode.value === "cluster") return node.groupColor || groupColor(clusterKeyForNode(node));
   if (orgSelectedChainIds.value.has(node.id)) return "#38bdf8";
   return "#60a5fa";
 }
@@ -395,6 +406,19 @@ async function updateManagerOptions() {
 }
 
 
+async function loadEmployeeFacets() {
+  try {
+    const res = await fetch(`${API_BASE}/employees/facets`);
+    if (!res.ok) return;
+    const payload = await res.json();
+    departmentOptions.value = payload.departments || [];
+    subDepartmentOptions.value = payload.sub_departments || [];
+  } catch (_err) {
+    departmentOptions.value = [];
+    subDepartmentOptions.value = [];
+  }
+}
+
 function resetAndLoad() {
   skip.value = 0;
   load();
@@ -522,6 +546,7 @@ watch([activeView, limit], () => resetAndLoad());
 
 onMounted(() => {
   document.addEventListener("fullscreenchange", onFullscreenChange);
+  loadEmployeeFacets();
   load();
 });
 
@@ -601,11 +626,11 @@ onBeforeUnmount(() => {
         </label>
         <label>
           Department
-          <input v-model="department" placeholder="Partner Support" />
+          <input v-model="department" list="department-options" placeholder="Partner Support" />
         </label>
         <label>
           Sub-department
-          <input v-model="subDepartment" placeholder="Service Delivery" />
+          <input v-model="subDepartment" list="subdepartment-options" placeholder="Service Delivery" />
         </label>
         <label>
           Manager
@@ -631,7 +656,7 @@ onBeforeUnmount(() => {
         </label>
         <label>
           Department filter
-          <input v-model="orgMapDepartment" placeholder="Partner Support" />
+          <input v-model="orgMapDepartment" list="department-options" placeholder="Partner Support" />
         </label>
         <label>
           Manager subtree ID
@@ -642,6 +667,16 @@ onBeforeUnmount(() => {
           <select v-model="orgLayoutMode">
             <option value="hierarchy">Hierarchy</option>
             <option value="cluster">Clustered groups</option>
+          </select>
+        </label>
+        <label>
+          Group clusters by
+          <select v-model="orgClusterBy" :disabled="orgLayoutMode !== 'cluster'">
+            <option value="department">Department</option>
+            <option value="subDepartment">Sub-department</option>
+            <option value="manager">Manager</option>
+            <option value="country">Country</option>
+            <option value="title">Title</option>
           </select>
         </label>
         <label>
@@ -678,6 +713,13 @@ onBeforeUnmount(() => {
           <input v-model="timeTo" placeholder="2025-12-01" />
         </label>
       </div>
+
+      <datalist id="department-options">
+        <option v-for="opt in departmentOptions" :key="`dept-${opt}`" :value="opt" />
+      </datalist>
+      <datalist id="subdepartment-options">
+        <option v-for="opt in subDepartmentOptions" :key="`subdept-${opt}`" :value="opt" />
+      </datalist>
 
       <div class="action-row">
         <button class="primary" @click="resetAndLoad">Apply</button>
