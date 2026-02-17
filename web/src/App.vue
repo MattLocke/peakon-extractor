@@ -53,7 +53,7 @@ const orgMapDepartment = ref("");
 const orgMapDepartmentInput = ref("");
 const selectedOrgDepartments = ref([]);
 const orgMapManagerFocus = ref("");
-const orgLayoutMode = ref("hierarchy");
+const orgLayoutMode = ref("hierarchy_tree");
 const orgClusterBy = ref("department");
 const orgClusterSpread = ref(1.8);
 const orgMapZoom = ref(1);
@@ -175,7 +175,66 @@ const clusterGroups = computed(() => {
   return out;
 });
 
-const nodesToRender = computed(() => (orgLayoutMode.value === "cluster" ? clusterNodes.value : filteredOrgNodes.value));
+const treeNodes = computed(() => {
+  const nodes = filteredOrgNodes.value;
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const children = new Map();
+  nodes.forEach((n) => children.set(n.id, []));
+
+  const roots = [];
+  for (const n of nodes) {
+    if (n.parentId && byId.has(n.parentId)) {
+      children.get(n.parentId).push(n.id);
+    } else {
+      roots.push(n.id);
+    }
+  }
+
+  roots.sort();
+  children.forEach((arr) => arr.sort());
+
+  let nextX = 0;
+  const pos = new Map();
+
+  function place(nodeId, depth) {
+    const kids = children.get(nodeId) || [];
+    let x;
+    if (!kids.length) {
+      x = nextX;
+      nextX += 1;
+    } else {
+      kids.forEach((kid) => place(kid, depth + 1));
+      const first = pos.get(kids[0]);
+      const last = pos.get(kids[kids.length - 1]);
+      x = ((first?.x || 0) + (last?.x || 0)) / 2;
+    }
+    pos.set(nodeId, { x, depth });
+  }
+
+  roots.forEach((rootId) => place(rootId, 0));
+
+  const xGap = 44;
+  const yGap = 135;
+  const values = Array.from(pos.values());
+  const minX = values.length ? Math.min(...values.map((v) => v.x)) : 0;
+  const maxX = values.length ? Math.max(...values.map((v) => v.x)) : 0;
+  const centerX = (minX + maxX) / 2;
+
+  return nodes.map((n) => {
+    const p = pos.get(n.id) || { x: 0, depth: n.depth || 0 };
+    return {
+      ...n,
+      x: (p.x - centerX) * xGap,
+      y: p.depth * yGap,
+    };
+  });
+});
+
+const nodesToRender = computed(() => {
+  if (orgLayoutMode.value === "cluster") return clusterNodes.value;
+  if (orgLayoutMode.value === "hierarchy_tree") return treeNodes.value;
+  return filteredOrgNodes.value;
+});
 const orgNodeById = computed(() => new Map(nodesToRender.value.map((n) => [n.id, n])));
 const filteredOrgNodeIds = computed(() => new Set(nodesToRender.value.map((n) => n.id)));
 const filteredOrgEdges = computed(() =>
@@ -199,12 +258,20 @@ const orgSelectedChainEdgeKeys = computed(() => {
   return keys;
 });
 
+function orgBaseX() {
+  return 700;
+}
+
+function orgBaseY() {
+  return orgLayoutMode.value === "hierarchy_tree" ? 110 : 700;
+}
+
 function orgNodeX(node) {
-  return 700 + orgPanX.value + (node.x || 0) * orgMapZoom.value;
+  return orgBaseX() + orgPanX.value + (node.x || 0) * orgMapZoom.value;
 }
 
 function orgNodeY(node) {
-  return 700 + orgPanY.value + (node.y || 0) * orgMapZoom.value;
+  return orgBaseY() + orgPanY.value + (node.y || 0) * orgMapZoom.value;
 }
 
 function orgNodeRadius(node) {
@@ -213,6 +280,7 @@ function orgNodeRadius(node) {
 }
 
 function showOrgLabels() {
+  if (orgLayoutMode.value === "hierarchy_tree") return orgMapZoom.value >= 1;
   return orgMapZoom.value >= 1.5;
 }
 
@@ -549,12 +617,14 @@ function onOrgWheel(event) {
   const newZoom = clampZoom(oldZoom * zoomFactor);
   if (newZoom === oldZoom) return;
 
-  const worldX = (pointerX - 700 - orgPanX.value) / oldZoom;
-  const worldY = (pointerY - 700 - orgPanY.value) / oldZoom;
+  const bx = orgBaseX();
+  const by = orgBaseY();
+  const worldX = (pointerX - bx - orgPanX.value) / oldZoom;
+  const worldY = (pointerY - by - orgPanY.value) / oldZoom;
 
   orgMapZoom.value = newZoom;
-  orgPanX.value = pointerX - 700 - worldX * newZoom;
-  orgPanY.value = pointerY - 700 - worldY * newZoom;
+  orgPanX.value = pointerX - bx - worldX * newZoom;
+  orgPanY.value = pointerY - by - worldY * newZoom;
 }
 
 function onOrgNodeClick(nodeId) {
@@ -746,7 +816,8 @@ onBeforeUnmount(() => {
         <label>
           Layout
           <select v-model="orgLayoutMode">
-            <option value="hierarchy">Hierarchy</option>
+            <option value="hierarchy_tree">Hierarchy tree</option>
+            <option value="hierarchy">Hierarchy radial</option>
             <option value="cluster">Clustered groups</option>
           </select>
         </label>
@@ -882,7 +953,7 @@ onBeforeUnmount(() => {
             :x2="orgNodeX(orgNodeById.get(edge.target) || {})"
             :y2="orgNodeY(orgNodeById.get(edge.target) || {})"
             :stroke="orgSelectedChainEdgeKeys.has(`${edge.source}-${edge.target}`) ? '#22c55e' : '#334155'"
-            :stroke-width="orgSelectedChainEdgeKeys.has(`${edge.source}-${edge.target}`) ? 2.4 : 1"
+            :stroke-width="orgSelectedChainEdgeKeys.has(`${edge.source}-${edge.target}`) ? 2.4 : (orgLayoutMode === 'hierarchy_tree' ? 1.4 : 1)"
           />
           <g
             v-for="node in nodesToRender"
