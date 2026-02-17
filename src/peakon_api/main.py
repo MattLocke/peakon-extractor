@@ -195,6 +195,12 @@ def _employee_department(employee: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _csv_values(raw: Optional[str]) -> List[str]:
+    if not raw:
+        return []
+    return [part.strip() for part in str(raw).split(",") if part.strip()]
+
+
 def _employee_filter_query(
     department: Optional[str],
     sub_department: Optional[str],
@@ -202,28 +208,24 @@ def _employee_filter_query(
 ) -> Optional[Dict[str, Any]]:
     conditions = []
 
-    if department:
-        pattern = {"$regex": re.escape(department), "$options": "i"}
-        conditions.append(
-            {
-                "$or": [
-                    {"attributes.Department": pattern},
-                    {"attributes.department": pattern},
-                ]
-            }
-        )
+    department_values = _csv_values(department)
+    if department_values:
+        department_or = []
+        for dep in department_values:
+            pattern = {"$regex": re.escape(dep), "$options": "i"}
+            department_or.append({"attributes.Department": pattern})
+            department_or.append({"attributes.department": pattern})
+        conditions.append({"$or": department_or})
 
-    if sub_department:
-        pattern = {"$regex": re.escape(sub_department), "$options": "i"}
-        conditions.append(
-            {
-                "$or": [
-                    {"attributes.Sub-Department": pattern},
-                    {"attributes.sub_department": pattern},
-                    {"attributes.sub-department": pattern},
-                ]
-            }
-        )
+    sub_department_values = _csv_values(sub_department)
+    if sub_department_values:
+        sub_department_or = []
+        for sub_dep in sub_department_values:
+            pattern = {"$regex": re.escape(sub_dep), "$options": "i"}
+            sub_department_or.append({"attributes.Sub-Department": pattern})
+            sub_department_or.append({"attributes.sub_department": pattern})
+            sub_department_or.append({"attributes.sub-department": pattern})
+        conditions.append({"$or": sub_department_or})
 
     if manager_id:
         manager_value = str(_parse_int(manager_id) or manager_id)
@@ -485,12 +487,13 @@ def org_map(department: Optional[str] = None, manager_id: Optional[str] = None) 
     db = get_db()
     query: Dict[str, Any] = {}
 
-    if department:
-        pattern = {"$regex": re.escape(department), "$options": "i"}
-        query["$or"] = [
-            {"attributes.Department": pattern},
-            {"attributes.department": pattern},
-        ]
+    department_values = _csv_values(department)
+    if department_values:
+        query["$or"] = []
+        for dep in department_values:
+            pattern = {"$regex": re.escape(dep), "$options": "i"}
+            query["$or"].append({"attributes.Department": pattern})
+            query["$or"].append({"attributes.department": pattern})
 
     employees = list(db.employees.find(query, {"_id": 1, "attributes": 1, "relationships": 1}))
     payload = build_org_map_payload(employees)

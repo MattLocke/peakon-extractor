@@ -32,6 +32,10 @@ const answeredTo = ref("");
 const hasComment = ref("");
 const department = ref("");
 const subDepartment = ref("");
+const departmentInput = ref("");
+const subDepartmentInput = ref("");
+const selectedDepartments = ref([]);
+const selectedSubDepartments = ref([]);
 const managerId = ref("");
 const grade = ref("");
 const impact = ref("");
@@ -46,6 +50,8 @@ const subDepartmentOptions = ref([]);
 const orgMap = ref({ nodes: [], edges: [], stats: {}, rootId: null });
 const orgMapSearch = ref("");
 const orgMapDepartment = ref("");
+const orgMapDepartmentInput = ref("");
+const selectedOrgDepartments = ref([]);
 const orgMapManagerFocus = ref("");
 const orgLayoutMode = ref("hierarchy");
 const orgClusterBy = ref("department");
@@ -360,6 +366,17 @@ function displayEmail() {
   return ANON_EMAIL;
 }
 
+function addChip(inputRef, listRef) {
+  const value = String(inputRef.value || "").trim();
+  if (!value) return;
+  if (!listRef.value.includes(value)) listRef.value.push(value);
+  inputRef.value = "";
+}
+
+function removeChip(listRef, value) {
+  listRef.value = listRef.value.filter((item) => item !== value);
+}
+
 async function updateManagerOptions() {
   if (activeView.value !== "answers_export") {
     managerOptions.value = [];
@@ -542,6 +559,16 @@ function nextPage() {
   }
 }
 
+watch(selectedDepartments, (vals) => {
+  department.value = vals.join(",");
+});
+watch(selectedSubDepartments, (vals) => {
+  subDepartment.value = vals.join(",");
+});
+watch(selectedOrgDepartments, (vals) => {
+  orgMapDepartment.value = vals.join(",");
+});
+
 watch([activeView, limit], () => resetAndLoad());
 
 onMounted(() => {
@@ -625,12 +652,32 @@ onBeforeUnmount(() => {
           </select>
         </label>
         <label>
-          Department
-          <input v-model="department" list="department-options" placeholder="Partner Support" />
+          Department(s)
+          <input
+            v-model="departmentInput"
+            list="department-options"
+            placeholder="Add department + Enter"
+            @keydown.enter.prevent="addChip(departmentInput, selectedDepartments)"
+          />
+          <div class="chip-row">
+            <button type="button" class="chip" v-for="dep in selectedDepartments" :key="`dep-${dep}`" @click="removeChip(selectedDepartments, dep)">
+              {{ dep }} ✕
+            </button>
+          </div>
         </label>
         <label>
-          Sub-department
-          <input v-model="subDepartment" list="subdepartment-options" placeholder="Service Delivery" />
+          Sub-department(s)
+          <input
+            v-model="subDepartmentInput"
+            list="subdepartment-options"
+            placeholder="Add sub-department + Enter"
+            @keydown.enter.prevent="addChip(subDepartmentInput, selectedSubDepartments)"
+          />
+          <div class="chip-row">
+            <button type="button" class="chip" v-for="sub in selectedSubDepartments" :key="`sub-${sub}`" @click="removeChip(selectedSubDepartments, sub)">
+              {{ sub }} ✕
+            </button>
+          </div>
         </label>
         <label>
           Manager
@@ -655,8 +702,18 @@ onBeforeUnmount(() => {
           <input v-model="orgMapSearch" placeholder="name, id, email, department" />
         </label>
         <label>
-          Department filter
-          <input v-model="orgMapDepartment" list="department-options" placeholder="Partner Support" />
+          Department filter(s)
+          <input
+            v-model="orgMapDepartmentInput"
+            list="department-options"
+            placeholder="Add department + Enter"
+            @keydown.enter.prevent="addChip(orgMapDepartmentInput, selectedOrgDepartments)"
+          />
+          <div class="chip-row">
+            <button type="button" class="chip" v-for="dep in selectedOrgDepartments" :key="`org-dep-${dep}`" @click="removeChip(selectedOrgDepartments, dep)">
+              {{ dep }} ✕
+            </button>
+          </div>
         </label>
         <label>
           Manager subtree ID

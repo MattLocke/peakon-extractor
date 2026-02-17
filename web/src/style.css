@@ -100,6 +100,20 @@ input {
   gap: 6px;
 }
 
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #334155;
+  border: 1px solid #475569;
+}
+
 .pager {
   display: flex;
   align-items: center;
