@@ -46,8 +46,16 @@ const orgMapSearch = ref("");
 const orgMapDepartment = ref("");
 const orgMapManagerFocus = ref("");
 const orgMapZoom = ref(1);
+const orgPanX = ref(0);
+const orgPanY = ref(0);
+const orgDragging = ref(false);
+const orgDidDrag = ref(false);
 const selectedOrgNodeId = ref("");
 let managerRequestId = 0;
+let orgDragStartX = 0;
+let orgDragStartY = 0;
+let orgPanStartX = 0;
+let orgPanStartY = 0;
 
 const hasPrev = computed(() => skip.value > 0);
 const hasNext = computed(() => skip.value + limit.value < total.value);
@@ -95,11 +103,11 @@ const orgSelectedChainEdgeKeys = computed(() => {
 });
 
 function orgNodeX(node) {
-  return 700 + (node.x || 0) * orgMapZoom.value;
+  return 700 + orgPanX.value + (node.x || 0) * orgMapZoom.value;
 }
 
 function orgNodeY(node) {
-  return 700 + (node.y || 0) * orgMapZoom.value;
+  return 700 + orgPanY.value + (node.y || 0) * orgMapZoom.value;
 }
 
 function orgNodeRadius(node) {
@@ -340,6 +348,44 @@ function clearOrgFocus() {
   resetAndLoad();
 }
 
+function resetOrgPan() {
+  orgPanX.value = 0;
+  orgPanY.value = 0;
+}
+
+function onOrgPointerDown(event) {
+  if (event.button !== 0) return;
+  orgDragging.value = true;
+  orgDidDrag.value = false;
+  orgDragStartX = event.clientX;
+  orgDragStartY = event.clientY;
+  orgPanStartX = orgPanX.value;
+  orgPanStartY = orgPanY.value;
+}
+
+function onOrgPointerMove(event) {
+  if (!orgDragging.value) return;
+  const dx = event.clientX - orgDragStartX;
+  const dy = event.clientY - orgDragStartY;
+  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+    orgDidDrag.value = true;
+  }
+  orgPanX.value = orgPanStartX + dx;
+  orgPanY.value = orgPanStartY + dy;
+}
+
+function onOrgPointerUp() {
+  orgDragging.value = false;
+  setTimeout(() => {
+    orgDidDrag.value = false;
+  }, 0);
+}
+
+function onOrgNodeClick(nodeId) {
+  if (orgDidDrag.value) return;
+  selectedOrgNodeId.value = nodeId;
+}
+
 function prevPage() {
   if (hasPrev.value) {
     skip.value = Math.max(0, skip.value - limit.value);
@@ -505,6 +551,7 @@ onMounted(() => load());
         <button class="primary" @click="resetAndLoad">Apply</button>
         <button v-if="activeView === 'org_map'" @click="focusOnSelectedManager" :disabled="!selectedOrgNodeId">Focus selected subtree</button>
         <button v-if="activeView === 'org_map'" @click="clearOrgFocus" :disabled="!orgMapManagerFocus">Clear focus</button>
+        <button v-if="activeView === 'org_map'" @click="resetOrgPan">Recenter</button>
       </div>
     </section>
 
@@ -528,7 +575,15 @@ onMounted(() => load());
 
     <section v-else-if="activeView === 'org_map'" class="org-layout">
       <div class="org-canvas-wrap card">
-        <svg class="org-canvas" viewBox="0 0 1400 1400">
+        <svg
+          class="org-canvas"
+          :class="{ dragging: orgDragging }"
+          viewBox="0 0 1400 1400"
+          @pointerdown="onOrgPointerDown"
+          @pointermove="onOrgPointerMove"
+          @pointerup="onOrgPointerUp"
+          @pointerleave="onOrgPointerUp"
+        >
           <line
             v-for="edge in filteredOrgEdges"
             :key="`${edge.source}-${edge.target}`"
@@ -543,7 +598,7 @@ onMounted(() => load());
             v-for="node in filteredOrgNodes"
             :key="node.id"
             class="org-node"
-            @click="selectedOrgNodeId = node.id"
+            @click.stop="onOrgNodeClick(node.id)"
           >
             <circle
               :cx="orgNodeX(node)"

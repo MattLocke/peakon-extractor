@@ -258,6 +258,13 @@ button:disabled {
   height: 640px;
   background: #0b1220;
   border-radius: 8px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.org-canvas.dragging {
+  cursor: grabbing;
 }
 
 .org-node {
