@@ -56,6 +56,7 @@ const orgMapManagerFocus = ref("");
 const orgLayoutMode = ref("hierarchy_tree");
 const orgClusterBy = ref("department");
 const orgClusterSpread = ref(1.8);
+const orgHideUnassigned = ref(true);
 const orgMapZoom = ref(1);
 const orgPanX = ref(0);
 const orgPanY = ref(0);
@@ -86,8 +87,11 @@ const selectedOrgNode = computed(() => {
 
 const filteredOrgNodes = computed(() => {
   const q = orgMapSearch.value.trim().toLowerCase();
-  if (!q) return orgMap.value.nodes;
   return orgMap.value.nodes.filter((node) => {
+    if (orgHideUnassigned.value && (!node.department || String(node.department).trim() === "")) {
+      return false;
+    }
+    if (!q) return true;
     return [node.label, node.id, node.email, node.department, node.subDepartment, node.country, node.title]
       .filter(Boolean)
       .some((v) => String(v).toLowerCase().includes(q));
@@ -196,22 +200,22 @@ const treeNodes = computed(() => {
   let nextX = 0;
   const pos = new Map();
 
-  function place(nodeId, depth) {
+  function place(nodeId) {
     const kids = children.get(nodeId) || [];
     let x;
     if (!kids.length) {
       x = nextX;
       nextX += 1;
     } else {
-      kids.forEach((kid) => place(kid, depth + 1));
+      kids.forEach((kid) => place(kid));
       const first = pos.get(kids[0]);
       const last = pos.get(kids[kids.length - 1]);
       x = ((first?.x || 0) + (last?.x || 0)) / 2;
     }
-    pos.set(nodeId, { x, depth });
+    pos.set(nodeId, { x });
   }
 
-  roots.forEach((rootId) => place(rootId, 0));
+  roots.forEach((rootId) => place(rootId));
 
   const xGap = 44;
   const yGap = 135;
@@ -221,11 +225,12 @@ const treeNodes = computed(() => {
   const centerX = (minX + maxX) / 2;
 
   return nodes.map((n) => {
-    const p = pos.get(n.id) || { x: 0, depth: n.depth || 0 };
+    const p = pos.get(n.id) || { x: 0 };
+    const d = Number.isFinite(Number(n.depth)) ? Number(n.depth) : 0;
     return {
       ...n,
       x: (p.x - centerX) * xGap,
-      y: p.depth * yGap,
+      y: d * yGap,
     };
   });
 });
@@ -243,6 +248,35 @@ const filteredOrgEdges = computed(() =>
   )
 );
 const edgesToRender = computed(() => (orgLayoutMode.value === "cluster" ? [] : filteredOrgEdges.value));
+const treeDepartmentOutlines = computed(() => {
+  if (orgLayoutMode.value !== "hierarchy_tree") return [];
+  const groups = new Map();
+  for (const n of nodesToRender.value) {
+    const key = n.department || "Unassigned";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(n);
+  }
+  const outlines = [];
+  groups.forEach((nodes, key) => {
+    if (key === "Unassigned") return;
+    const xs = nodes.map((n) => n.x || 0);
+    const ys = nodes.map((n) => n.y || 0);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    outlines.push({
+      key,
+      color: groupColor(key),
+      x: minX - 24,
+      y: minY - 24,
+      w: Math.max(48, maxX - minX + 48),
+      h: Math.max(48, maxY - minY + 48),
+      count: nodes.length,
+    });
+  });
+  return outlines;
+});
 const orgSelectedChainIds = computed(() => {
   if (!selectedOrgNodeId.value) return new Set();
   return new Set(orgParentChain(selectedOrgNodeId.value).map((n) => n.id));
@@ -850,6 +884,10 @@ onBeforeUnmount(() => {
             <option :value="2">200%</option>
           </select>
         </label>
+        <label class="toggle-inline">
+          <input type="checkbox" v-model="orgHideUnassigned" />
+          Hide unassigned dept
+        </label>
       </div>
 
       <div v-else class="filters-row">
@@ -938,6 +976,32 @@ onBeforeUnmount(() => {
               <text
                 :x="orgNodeX({ x: group.cx, y: 0 })"
                 :y="orgNodeY({ x: 0, y: group.cy }) - Math.max(26, group.r * orgMapZoom + 8)"
+                class="org-group-label"
+              >
+                {{ group.key }} ({{ group.count }})
+              </text>
+            </g>
+          </g>
+
+          <g v-if="orgLayoutMode === 'hierarchy_tree'">
+            <g v-for="group in treeDepartmentOutlines" :key="`tree-dept-${group.key}`">
+              <rect
+                :x="orgNodeX({ x: group.x, y: 0 })"
+                :y="orgNodeY({ x: 0, y: group.y })"
+                :width="Math.max(30, group.w * orgMapZoom)"
+                :height="Math.max(30, group.h * orgMapZoom)"
+                rx="10"
+                ry="10"
+                :fill="group.color"
+                fill-opacity="0.05"
+                :stroke="group.color"
+                stroke-opacity="0.35"
+                stroke-width="1.5"
+                stroke-dasharray="5 4"
+              />
+              <text
+                :x="orgNodeX({ x: group.x + group.w / 2, y: 0 })"
+                :y="orgNodeY({ x: 0, y: group.y }) - 8"
                 class="org-group-label"
               >
                 {{ group.key }} ({{ group.count }})
