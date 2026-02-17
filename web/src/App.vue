@@ -57,7 +57,8 @@ const orgLayoutMode = ref("hierarchy_tree");
 const orgClusterBy = ref("department");
 const orgClusterSpread = ref(1.8);
 const orgHideUnassigned = ref(true);
-const orgTreeSpreadY = ref(1.8);
+const orgTreeSpreadX = ref(1.6);
+const orgTreeSpreadY = ref(2.4);
 const orgMapZoom = ref(1);
 const orgPanX = ref(0);
 const orgPanY = ref(0);
@@ -218,8 +219,8 @@ const treeNodes = computed(() => {
 
   roots.forEach((rootId) => place(rootId));
 
-  const xGap = 52;
-  const yGap = 110 + orgTreeSpreadY.value * 90;
+  const xGap = 52 + orgTreeSpreadX.value * 48;
+  const yGap = 180 + orgTreeSpreadY.value * 180;
   const values = Array.from(pos.values());
   const minX = values.length ? Math.min(...values.map((v) => v.x)) : 0;
   const maxX = values.length ? Math.max(...values.map((v) => v.x)) : 0;
@@ -887,12 +888,22 @@ onBeforeUnmount(() => {
           </select>
         </label>
         <label>
+          Tree horizontal spread
+          <select v-model.number="orgTreeSpreadX" :disabled="orgLayoutMode !== 'hierarchy_tree'">
+            <option :value="1.0">Compact</option>
+            <option :value="1.6">Balanced</option>
+            <option :value="2.4">Wide</option>
+            <option :value="3.2">Very wide</option>
+          </select>
+        </label>
+        <label>
           Tree vertical spread
           <select v-model.number="orgTreeSpreadY" :disabled="orgLayoutMode !== 'hierarchy_tree'">
             <option :value="1.2">Compact</option>
-            <option :value="1.8">Balanced</option>
-            <option :value="2.6">Tall</option>
-            <option :value="3.4">Very tall</option>
+            <option :value="2.4">Balanced</option>
+            <option :value="3.6">Tall</option>
+            <option :value="4.8">Very tall</option>
+            <option :value="6.0">Extreme</option>
           </select>
         </label>
         <label>
