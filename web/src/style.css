@@ -78,6 +78,16 @@ input {
   margin-bottom: 16px;
 }
 
+.action-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.action-row.compact {
+  margin: 8px 0;
+}
+
 .filters-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -252,6 +262,12 @@ button:disabled {
 
 .org-node {
   cursor: pointer;
+}
+
+.org-label {
+  fill: #e2e8f0;
+  font-size: 11px;
+  pointer-events: none;
 }
 
 .org-panel ul {

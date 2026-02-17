@@ -44,6 +44,7 @@ const managerCache = ref(new Map());
 const orgMap = ref({ nodes: [], edges: [], stats: {}, rootId: null });
 const orgMapSearch = ref("");
 const orgMapDepartment = ref("");
+const orgMapManagerFocus = ref("");
 const orgMapZoom = ref(1);
 const selectedOrgNodeId = ref("");
 let managerRequestId = 0;
@@ -71,12 +72,27 @@ const filteredOrgNodes = computed(() => {
   });
 });
 
+const orgNodeById = computed(() => new Map(orgMap.value.nodes.map((n) => [n.id, n])));
 const filteredOrgNodeIds = computed(() => new Set(filteredOrgNodes.value.map((n) => n.id)));
 const filteredOrgEdges = computed(() =>
   orgMap.value.edges.filter(
     (edge) => filteredOrgNodeIds.value.has(edge.source) && filteredOrgNodeIds.value.has(edge.target)
   )
 );
+const orgSelectedChainIds = computed(() => {
+  if (!selectedOrgNodeId.value) return new Set();
+  return new Set(orgParentChain(selectedOrgNodeId.value).map((n) => n.id));
+});
+const orgSelectedChainEdgeKeys = computed(() => {
+  const keys = new Set();
+  const chain = orgParentChain(selectedOrgNodeId.value || "");
+  for (let i = 0; i < chain.length - 1; i += 1) {
+    const child = chain[i];
+    const parent = chain[i + 1];
+    keys.add(`${parent.id}-${child.id}`);
+  }
+  return keys;
+});
 
 function orgNodeX(node) {
   return 700 + (node.x || 0) * orgMapZoom.value;
@@ -84,6 +100,15 @@ function orgNodeX(node) {
 
 function orgNodeY(node) {
   return 700 + (node.y || 0) * orgMapZoom.value;
+}
+
+function orgNodeRadius(node) {
+  const base = selectedOrgNodeId.value === node.id ? 10 : 7;
+  return Math.max(4, base + Math.min(4, (node.directReports || 0) / 5));
+}
+
+function showOrgLabels() {
+  return orgMapZoom.value >= 1.5;
 }
 
 function orgParentChain(nodeId) {
@@ -112,6 +137,7 @@ async function load() {
     if (activeView.value === "org_map") {
       const orgParams = new URLSearchParams();
       if (orgMapDepartment.value.trim()) orgParams.set("department", orgMapDepartment.value.trim());
+      if (orgMapManagerFocus.value.trim()) orgParams.set("manager_id", orgMapManagerFocus.value.trim());
       const res = await fetch(`${API_BASE}/org_map?${orgParams.toString()}`);
       if (!res.ok) {
         const text = await res.text();
@@ -303,6 +329,17 @@ function resetAndLoad() {
   load();
 }
 
+function focusOnSelectedManager() {
+  if (!selectedOrgNodeId.value) return;
+  orgMapManagerFocus.value = selectedOrgNodeId.value;
+  resetAndLoad();
+}
+
+function clearOrgFocus() {
+  orgMapManagerFocus.value = "";
+  resetAndLoad();
+}
+
 function prevPage() {
   if (hasPrev.value) {
     skip.value = Math.max(0, skip.value - limit.value);
@@ -426,6 +463,10 @@ onMounted(() => load());
           <input v-model="orgMapDepartment" placeholder="Partner Support" />
         </label>
         <label>
+          Manager subtree ID
+          <input v-model="orgMapManagerFocus" placeholder="optional manager id" />
+        </label>
+        <label>
           Zoom
           <select v-model.number="orgMapZoom">
             <option :value="0.5">50%</option>
@@ -460,7 +501,11 @@ onMounted(() => load());
         </label>
       </div>
 
-      <button class="primary" @click="resetAndLoad">Apply</button>
+      <div class="action-row">
+        <button class="primary" @click="resetAndLoad">Apply</button>
+        <button v-if="activeView === 'org_map'" @click="focusOnSelectedManager" :disabled="!selectedOrgNodeId">Focus selected subtree</button>
+        <button v-if="activeView === 'org_map'" @click="clearOrgFocus" :disabled="!orgMapManagerFocus">Clear focus</button>
+      </div>
     </section>
 
     <section v-if="activeView !== 'org_map'" class="pager">
@@ -487,12 +532,12 @@ onMounted(() => load());
           <line
             v-for="edge in filteredOrgEdges"
             :key="`${edge.source}-${edge.target}`"
-            :x1="orgNodeX(orgMap.nodes.find((n) => n.id === edge.source) || {})"
-            :y1="orgNodeY(orgMap.nodes.find((n) => n.id === edge.source) || {})"
-            :x2="orgNodeX(orgMap.nodes.find((n) => n.id === edge.target) || {})"
-            :y2="orgNodeY(orgMap.nodes.find((n) => n.id === edge.target) || {})"
-            stroke="#334155"
-            stroke-width="1"
+            :x1="orgNodeX(orgNodeById.get(edge.source) || {})"
+            :y1="orgNodeY(orgNodeById.get(edge.source) || {})"
+            :x2="orgNodeX(orgNodeById.get(edge.target) || {})"
+            :y2="orgNodeY(orgNodeById.get(edge.target) || {})"
+            :stroke="orgSelectedChainEdgeKeys.has(`${edge.source}-${edge.target}`) ? '#22c55e' : '#334155'"
+            :stroke-width="orgSelectedChainEdgeKeys.has(`${edge.source}-${edge.target}`) ? 2.4 : 1"
           />
           <g
             v-for="node in filteredOrgNodes"
@@ -503,9 +548,17 @@ onMounted(() => load());
             <circle
               :cx="orgNodeX(node)"
               :cy="orgNodeY(node)"
-              r="8"
-              :fill="selectedOrgNodeId === node.id ? '#22c55e' : '#60a5fa'"
+              :r="orgNodeRadius(node)"
+              :fill="selectedOrgNodeId === node.id ? '#22c55e' : (orgSelectedChainIds.has(node.id) ? '#38bdf8' : '#60a5fa')"
             />
+            <text
+              v-if="showOrgLabels() || selectedOrgNodeId === node.id"
+              :x="orgNodeX(node) + 10"
+              :y="orgNodeY(node) - 10"
+              class="org-label"
+            >
+              {{ node.label }}
+            </text>
           </g>
         </svg>
       </div>
@@ -518,6 +571,9 @@ onMounted(() => load());
         <p><strong>Email:</strong> {{ selectedOrgNode.email || '—' }}</p>
         <p><strong>Direct reports:</strong> {{ selectedOrgNode.directReports ?? 0 }}</p>
         <p><strong>Subtree size:</strong> {{ selectedOrgNode.subtreeSize ?? 1 }}</p>
+        <div class="action-row compact">
+          <button @click="focusOnSelectedManager">Focus this subtree</button>
+        </div>
 
         <div>
           <strong>Chain to root:</strong>
