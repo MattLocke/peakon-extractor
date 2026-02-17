@@ -45,6 +45,7 @@ const orgMap = ref({ nodes: [], edges: [], stats: {}, rootId: null });
 const orgMapSearch = ref("");
 const orgMapDepartment = ref("");
 const orgMapManagerFocus = ref("");
+const orgLayoutMode = ref("hierarchy");
 const orgMapZoom = ref(1);
 const orgPanX = ref(0);
 const orgPanY = ref(0);
@@ -83,13 +84,65 @@ const filteredOrgNodes = computed(() => {
   });
 });
 
-const orgNodeById = computed(() => new Map(orgMap.value.nodes.map((n) => [n.id, n])));
-const filteredOrgNodeIds = computed(() => new Set(filteredOrgNodes.value.map((n) => n.id)));
+function hashSeed(input) {
+  const s = String(input || "");
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i += 1) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return Math.abs(h >>> 0);
+}
+
+function groupColor(groupKey) {
+  const palette = ["#60a5fa", "#f59e0b", "#22c55e", "#f472b6", "#a78bfa", "#fb7185", "#34d399", "#facc15"];
+  return palette[hashSeed(groupKey) % palette.length];
+}
+
+const clusterNodes = computed(() => {
+  const groups = new Map();
+  for (const node of filteredOrgNodes.value) {
+    const key = node.department || "Unassigned";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(node);
+  }
+
+  const groupEntries = Array.from(groups.entries()).sort((a, b) => b[1].length - a[1].length);
+  const groupCount = Math.max(1, groupEntries.length);
+  const centerRadius = 360;
+  const out = [];
+
+  groupEntries.forEach(([groupKey, nodes], gi) => {
+    const theta = (2 * Math.PI * gi) / groupCount;
+    const cx = Math.cos(theta) * centerRadius;
+    const cy = Math.sin(theta) * centerRadius;
+
+    nodes.forEach((node) => {
+      const seed = hashSeed(`${groupKey}:${node.id}`);
+      const angle = ((seed % 3600) / 3600) * 2 * Math.PI;
+      const localR = 20 + (seed % 160) + Math.sqrt(nodes.length) * 6;
+      out.push({
+        ...node,
+        x: cx + Math.cos(angle) * localR,
+        y: cy + Math.sin(angle) * localR,
+        groupKey,
+        groupColor: groupColor(groupKey),
+      });
+    });
+  });
+
+  return out;
+});
+
+const nodesToRender = computed(() => (orgLayoutMode.value === "cluster" ? clusterNodes.value : filteredOrgNodes.value));
+const orgNodeById = computed(() => new Map(nodesToRender.value.map((n) => [n.id, n])));
+const filteredOrgNodeIds = computed(() => new Set(nodesToRender.value.map((n) => n.id)));
 const filteredOrgEdges = computed(() =>
   orgMap.value.edges.filter(
     (edge) => filteredOrgNodeIds.value.has(edge.source) && filteredOrgNodeIds.value.has(edge.target)
   )
 );
+const edgesToRender = computed(() => (orgLayoutMode.value === "cluster" ? [] : filteredOrgEdges.value));
 const orgSelectedChainIds = computed(() => {
   if (!selectedOrgNodeId.value) return new Set();
   return new Set(orgParentChain(selectedOrgNodeId.value).map((n) => n.id));
@@ -120,6 +173,13 @@ function orgNodeRadius(node) {
 
 function showOrgLabels() {
   return orgMapZoom.value >= 1.5;
+}
+
+function orgNodeFill(node) {
+  if (selectedOrgNodeId.value === node.id) return "#22c55e";
+  if (orgLayoutMode.value === "cluster") return node.groupColor || groupColor(node.department || "Unassigned");
+  if (orgSelectedChainIds.value.has(node.id)) return "#38bdf8";
+  return "#60a5fa";
 }
 
 function orgParentChain(nodeId) {
@@ -578,6 +638,13 @@ onBeforeUnmount(() => {
           <input v-model="orgMapManagerFocus" placeholder="optional manager id" />
         </label>
         <label>
+          Layout
+          <select v-model="orgLayoutMode">
+            <option value="hierarchy">Hierarchy</option>
+            <option value="cluster">Clustered groups</option>
+          </select>
+        </label>
+        <label>
           Zoom
           <select v-model.number="orgMapZoom">
             <option :value="0.5">50%</option>
@@ -631,7 +698,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section v-else class="pager">
-      <span>{{ filteredOrgNodes.length }} shown / {{ orgMap.stats?.employees || 0 }} total employees</span>
+      <span>{{ nodesToRender.length }} shown / {{ orgMap.stats?.employees || 0 }} total employees</span>
       <span>Depth {{ orgMap.stats?.maxDepth ?? 0 }}</span>
       <span>Orphans {{ orgMap.stats?.orphans ?? 0 }}</span>
     </section>
@@ -653,7 +720,7 @@ onBeforeUnmount(() => {
           @pointerleave="onOrgPointerUp"
         >
           <line
-            v-for="edge in filteredOrgEdges"
+            v-for="edge in edgesToRender"
             :key="`${edge.source}-${edge.target}`"
             :x1="orgNodeX(orgNodeById.get(edge.source) || {})"
             :y1="orgNodeY(orgNodeById.get(edge.source) || {})"
@@ -663,7 +730,7 @@ onBeforeUnmount(() => {
             :stroke-width="orgSelectedChainEdgeKeys.has(`${edge.source}-${edge.target}`) ? 2.4 : 1"
           />
           <g
-            v-for="node in filteredOrgNodes"
+            v-for="node in nodesToRender"
             :key="node.id"
             class="org-node"
             @click.stop="onOrgNodeClick(node.id)"
@@ -672,7 +739,7 @@ onBeforeUnmount(() => {
               :cx="orgNodeX(node)"
               :cy="orgNodeY(node)"
               :r="orgNodeRadius(node)"
-              :fill="selectedOrgNodeId === node.id ? '#22c55e' : (orgSelectedChainIds.has(node.id) ? '#38bdf8' : '#60a5fa')"
+              :fill="orgNodeFill(node)"
             />
             <text
               v-if="showOrgLabels() || selectedOrgNodeId === node.id"
