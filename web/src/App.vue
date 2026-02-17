@@ -435,6 +435,13 @@ function onOrgWheel(event) {
 function onOrgNodeClick(nodeId) {
   if (orgDidDrag.value) return;
   selectedOrgNodeId.value = nodeId;
+
+  // In focused mode, clicking a node drills into that manager's subtree
+  // so their direct/indirect reports become the visible graph.
+  if (orgMapManagerFocus.value && orgMapManagerFocus.value !== nodeId) {
+    orgMapManagerFocus.value = nodeId;
+    resetAndLoad();
+  }
 }
 
 function prevPage() {
