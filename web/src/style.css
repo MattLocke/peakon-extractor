@@ -322,8 +322,9 @@ button:disabled {
 }
 
 .org-group-label {
-  fill: #cbd5e1;
-  font-size: 11px;
+  fill: #f8fafc;
+  font-size: 12px;
+  font-weight: 700;
   text-anchor: middle;
   pointer-events: none;
 }

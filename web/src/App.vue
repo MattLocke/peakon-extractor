@@ -57,6 +57,7 @@ const orgLayoutMode = ref("hierarchy_tree");
 const orgClusterBy = ref("department");
 const orgClusterSpread = ref(1.8);
 const orgHideUnassigned = ref(true);
+const orgTreeSpreadY = ref(1.8);
 const orgMapZoom = ref(1);
 const orgPanX = ref(0);
 const orgPanY = ref(0);
@@ -217,8 +218,8 @@ const treeNodes = computed(() => {
 
   roots.forEach((rootId) => place(rootId));
 
-  const xGap = 44;
-  const yGap = 135;
+  const xGap = 52;
+  const yGap = 110 + orgTreeSpreadY.value * 90;
   const values = Array.from(pos.values());
   const minX = values.length ? Math.min(...values.map((v) => v.x)) : 0;
   const maxX = values.length ? Math.max(...values.map((v) => v.x)) : 0;
@@ -250,15 +251,26 @@ const filteredOrgEdges = computed(() =>
 const edgesToRender = computed(() => (orgLayoutMode.value === "cluster" ? [] : filteredOrgEdges.value));
 const treeDepartmentOutlines = computed(() => {
   if (orgLayoutMode.value !== "hierarchy_tree") return [];
+
+  const deptSet = new Set(
+    nodesToRender.value
+      .map((n) => (n.department || "").trim())
+      .filter((v) => v !== "")
+  );
+  const preferSubDept = deptSet.size <= 1;
+
   const groups = new Map();
   for (const n of nodesToRender.value) {
-    const key = n.department || "Unassigned";
+    const keyRaw = preferSubDept ? (n.subDepartment || n.department || "") : (n.department || "");
+    const key = String(keyRaw || "").trim();
+    if (!key) continue;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(n);
   }
+
   const outlines = [];
   groups.forEach((nodes, key) => {
-    if (key === "Unassigned") return;
+    if (!nodes.length) return;
     const xs = nodes.map((n) => n.x || 0);
     const ys = nodes.map((n) => n.y || 0);
     const minX = Math.min(...xs);
@@ -268,14 +280,14 @@ const treeDepartmentOutlines = computed(() => {
     outlines.push({
       key,
       color: groupColor(key),
-      x: minX - 24,
-      y: minY - 24,
-      w: Math.max(48, maxX - minX + 48),
-      h: Math.max(48, maxY - minY + 48),
+      x: minX - 36,
+      y: minY - 32,
+      w: Math.max(72, maxX - minX + 72),
+      h: Math.max(72, maxY - minY + 64),
       count: nodes.length,
     });
   });
-  return outlines;
+  return outlines.sort((a, b) => a.key.localeCompare(b.key));
 });
 const orgSelectedChainIds = computed(() => {
   if (!selectedOrgNodeId.value) return new Set();
@@ -875,6 +887,15 @@ onBeforeUnmount(() => {
           </select>
         </label>
         <label>
+          Tree vertical spread
+          <select v-model.number="orgTreeSpreadY" :disabled="orgLayoutMode !== 'hierarchy_tree'">
+            <option :value="1.2">Compact</option>
+            <option :value="1.8">Balanced</option>
+            <option :value="2.6">Tall</option>
+            <option :value="3.4">Very tall</option>
+          </select>
+        </label>
+        <label>
           Zoom
           <select v-model.number="orgMapZoom">
             <option :value="0.5">50%</option>
@@ -993,11 +1014,11 @@ onBeforeUnmount(() => {
                 rx="10"
                 ry="10"
                 :fill="group.color"
-                fill-opacity="0.05"
+                fill-opacity="0.1"
                 :stroke="group.color"
-                stroke-opacity="0.35"
-                stroke-width="1.5"
-                stroke-dasharray="5 4"
+                stroke-opacity="0.75"
+                stroke-width="2.5"
+                stroke-dasharray=""
               />
               <text
                 :x="orgNodeX({ x: group.x + group.w / 2, y: 0 })"
