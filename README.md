@@ -46,6 +46,7 @@ Filters are available in the UI for:
 - Answers export: search text, employee ID, question ID, score range, answered date range
 - Scores contexts: grade, impact, time range
 - Scores by driver: driver ID, grade, time range
+- Org Map Explorer: employee graph from manager relationships with search + zoom + detail panel
 
 ## Configuration
 

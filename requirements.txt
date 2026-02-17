@@ -10,4 +10,5 @@ rich>=13.7.1
 fastapi>=0.110.0
 uvicorn>=0.29.0
 pytest>=8.2.0
+pytest-asyncio>=0.23.8
 respx>=0.21.0

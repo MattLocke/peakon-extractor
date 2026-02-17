@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pymongo import DESCENDING
 
 from .db import get_db
+from .org_map import build_org_map_payload
 
 app = FastAPI(title="Peakon Browse API")
 
@@ -435,3 +436,50 @@ def get_employee(employee_id: str) -> Dict[str, Any]:
     if not doc:
         return {"employee": None}
     return {"employee": _serialize(doc)}
+
+
+@app.get("/org_map")
+def org_map(department: Optional[str] = None, manager_id: Optional[str] = None) -> Dict[str, Any]:
+    db = get_db()
+    query: Dict[str, Any] = {}
+
+    if department:
+        pattern = {"$regex": re.escape(department), "$options": "i"}
+        query["$or"] = [
+            {"attributes.Department": pattern},
+            {"attributes.department": pattern},
+        ]
+
+    employees = list(db.employees.find(query, {"_id": 1, "attributes": 1, "relationships": 1}))
+    payload = build_org_map_payload(employees)
+
+    if manager_id:
+        manager_str = str(manager_id)
+        node_lookup = {node["id"]: node for node in payload["nodes"]}
+        if manager_str not in node_lookup:
+            payload["nodes"] = []
+            payload["edges"] = []
+            payload["stats"]["renderedNodes"] = 0
+            payload["stats"]["renderedEdges"] = 0
+            return payload
+
+        keep: set[str] = set([manager_str])
+        children_by_parent: Dict[str, List[str]] = {}
+        for edge in payload["edges"]:
+            children_by_parent.setdefault(edge["source"], []).append(edge["target"])
+
+        queue = [manager_str]
+        while queue:
+            parent = queue.pop(0)
+            for child in children_by_parent.get(parent, []):
+                if child not in keep:
+                    keep.add(child)
+                    queue.append(child)
+
+        payload["nodes"] = [node for node in payload["nodes"] if node["id"] in keep]
+        payload["edges"] = [edge for edge in payload["edges"] if edge["source"] in keep and edge["target"] in keep]
+        payload["rootId"] = manager_str
+        payload["stats"]["renderedNodes"] = len(payload["nodes"])
+        payload["stats"]["renderedEdges"] = len(payload["edges"])
+
+    return _serialize(payload)

@@ -95,6 +95,7 @@ input {
   align-items: center;
   gap: 16px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
 button {
@@ -228,4 +229,38 @@ button:disabled {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.org-layout {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 16px;
+}
+
+.org-canvas-wrap {
+  padding: 8px;
+  overflow: auto;
+  min-height: 640px;
+}
+
+.org-canvas {
+  width: 100%;
+  height: 640px;
+  background: #0b1220;
+  border-radius: 8px;
+}
+
+.org-node {
+  cursor: pointer;
+}
+
+.org-panel ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+@media (max-width: 900px) {
+  .org-layout {
+    grid-template-columns: 1fr;
+  }
 }

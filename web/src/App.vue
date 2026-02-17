@@ -6,6 +6,7 @@ const views = [
   { id: "answers_export", label: "Answers Export" },
   { id: "scores_contexts", label: "Scores Contexts" },
   { id: "scores_by_driver", label: "Scores By Driver" },
+  { id: "org_map", label: "Org Map Explorer" },
 ];
 
 const activeView = ref("answers_export");
@@ -40,6 +41,11 @@ const ANON_EMAIL = "user@pax8.com";
 const managerOptions = ref([]);
 const managerLoading = ref(false);
 const managerCache = ref(new Map());
+const orgMap = ref({ nodes: [], edges: [], stats: {}, rootId: null });
+const orgMapSearch = ref("");
+const orgMapDepartment = ref("");
+const orgMapZoom = ref(1);
+const selectedOrgNodeId = ref("");
 let managerRequestId = 0;
 
 const hasPrev = computed(() => skip.value > 0);
@@ -50,6 +56,50 @@ const pageRange = computed(() => {
   return `${start}-${end} of ${total.value}`;
 });
 
+const selectedOrgNode = computed(() => {
+  if (!selectedOrgNodeId.value) return null;
+  return orgMap.value.nodes.find((node) => node.id === selectedOrgNodeId.value) || null;
+});
+
+const filteredOrgNodes = computed(() => {
+  const q = orgMapSearch.value.trim().toLowerCase();
+  if (!q) return orgMap.value.nodes;
+  return orgMap.value.nodes.filter((node) => {
+    return [node.label, node.id, node.email, node.department, node.title]
+      .filter(Boolean)
+      .some((v) => String(v).toLowerCase().includes(q));
+  });
+});
+
+const filteredOrgNodeIds = computed(() => new Set(filteredOrgNodes.value.map((n) => n.id)));
+const filteredOrgEdges = computed(() =>
+  orgMap.value.edges.filter(
+    (edge) => filteredOrgNodeIds.value.has(edge.source) && filteredOrgNodeIds.value.has(edge.target)
+  )
+);
+
+function orgNodeX(node) {
+  return 700 + (node.x || 0) * orgMapZoom.value;
+}
+
+function orgNodeY(node) {
+  return 700 + (node.y || 0) * orgMapZoom.value;
+}
+
+function orgParentChain(nodeId) {
+  const byId = new Map(orgMap.value.nodes.map((n) => [n.id, n]));
+  const chain = [];
+  let current = byId.get(nodeId);
+  const guard = new Set();
+  while (current && !guard.has(current.id)) {
+    guard.add(current.id);
+    chain.push(current);
+    if (!current.parentId) break;
+    current = byId.get(current.parentId);
+  }
+  return chain;
+}
+
 async function load() {
   loading.value = true;
   error.value = "";
@@ -58,6 +108,30 @@ async function load() {
       limit: String(limit.value),
       skip: String(skip.value),
     });
+
+    if (activeView.value === "org_map") {
+      const orgParams = new URLSearchParams();
+      if (orgMapDepartment.value.trim()) orgParams.set("department", orgMapDepartment.value.trim());
+      const res = await fetch(`${API_BASE}/org_map?${orgParams.toString()}`);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      const payload = await res.json();
+      orgMap.value = {
+        nodes: payload.nodes || [],
+        edges: payload.edges || [],
+        stats: payload.stats || {},
+        rootId: payload.rootId || null,
+      };
+      items.value = [];
+      total.value = orgMap.value.nodes.length;
+      uniqueEmployees.value = orgMap.value.nodes.length;
+      if (!selectedOrgNodeId.value && orgMap.value.rootId) {
+        selectedOrgNodeId.value = orgMap.value.rootId;
+      }
+      return;
+    }
     if (activeView.value === "answers_export") {
       if (search.value.trim()) params.set("search", search.value.trim());
       if (employeeId.value.trim()) params.set("employee_id", employeeId.value.trim());
@@ -342,6 +416,27 @@ onMounted(() => load());
         </label>
       </div>
 
+      <div v-else-if="activeView === 'org_map'" class="filters-row">
+        <label>
+          Search people
+          <input v-model="orgMapSearch" placeholder="name, id, email, department" />
+        </label>
+        <label>
+          Department filter
+          <input v-model="orgMapDepartment" placeholder="Partner Support" />
+        </label>
+        <label>
+          Zoom
+          <select v-model.number="orgMapZoom">
+            <option :value="0.5">50%</option>
+            <option :value="0.75">75%</option>
+            <option :value="1">100%</option>
+            <option :value="1.5">150%</option>
+            <option :value="2">200%</option>
+          </select>
+        </label>
+      </div>
+
       <div v-else class="filters-row">
         <label v-if="activeView === 'scores_by_driver'">
           Driver ID
@@ -368,7 +463,7 @@ onMounted(() => load());
       <button class="primary" @click="resetAndLoad">Apply</button>
     </section>
 
-    <section class="pager">
+    <section v-if="activeView !== 'org_map'" class="pager">
       <button :disabled="!hasPrev || loading" @click="prevPage">Prev</button>
       <span>{{ pageRange }}</span>
       <span v-if="activeView === 'answers_export'">
@@ -377,8 +472,64 @@ onMounted(() => load());
       <button :disabled="!hasNext || loading" @click="nextPage">Next</button>
     </section>
 
+    <section v-else class="pager">
+      <span>{{ filteredOrgNodes.length }} shown / {{ orgMap.stats?.employees || 0 }} total employees</span>
+      <span>Depth {{ orgMap.stats?.maxDepth ?? 0 }}</span>
+      <span>Orphans {{ orgMap.stats?.orphans ?? 0 }}</span>
+    </section>
+
     <section v-if="loading" class="status">Loading…</section>
     <section v-else-if="error" class="status error">{{ error }}</section>
+
+    <section v-else-if="activeView === 'org_map'" class="org-layout">
+      <div class="org-canvas-wrap card">
+        <svg class="org-canvas" viewBox="0 0 1400 1400">
+          <line
+            v-for="edge in filteredOrgEdges"
+            :key="`${edge.source}-${edge.target}`"
+            :x1="orgNodeX(orgMap.nodes.find((n) => n.id === edge.source) || {})"
+            :y1="orgNodeY(orgMap.nodes.find((n) => n.id === edge.source) || {})"
+            :x2="orgNodeX(orgMap.nodes.find((n) => n.id === edge.target) || {})"
+            :y2="orgNodeY(orgMap.nodes.find((n) => n.id === edge.target) || {})"
+            stroke="#334155"
+            stroke-width="1"
+          />
+          <g
+            v-for="node in filteredOrgNodes"
+            :key="node.id"
+            class="org-node"
+            @click="selectedOrgNodeId = node.id"
+          >
+            <circle
+              :cx="orgNodeX(node)"
+              :cy="orgNodeY(node)"
+              r="8"
+              :fill="selectedOrgNodeId === node.id ? '#22c55e' : '#60a5fa'"
+            />
+          </g>
+        </svg>
+      </div>
+
+      <aside class="org-panel card" v-if="selectedOrgNode">
+        <h3>{{ selectedOrgNode.label }}</h3>
+        <p class="subtle">ID: {{ selectedOrgNode.id }}</p>
+        <p><strong>Dept:</strong> {{ selectedOrgNode.department || '—' }}</p>
+        <p><strong>Title:</strong> {{ selectedOrgNode.title || '—' }}</p>
+        <p><strong>Email:</strong> {{ selectedOrgNode.email || '—' }}</p>
+        <p><strong>Direct reports:</strong> {{ selectedOrgNode.directReports ?? 0 }}</p>
+        <p><strong>Subtree size:</strong> {{ selectedOrgNode.subtreeSize ?? 1 }}</p>
+
+        <div>
+          <strong>Chain to root:</strong>
+          <ul>
+            <li v-for="node in orgParentChain(selectedOrgNode.id)" :key="`chain-${node.id}`">
+              {{ node.label }} ({{ node.id }})
+            </li>
+          </ul>
+        </div>
+      </aside>
+    </section>
+
     <section v-else class="list">
       <article
         v-for="item in items"
