@@ -315,6 +315,13 @@ button:disabled {
   pointer-events: none;
 }
 
+.org-group-label {
+  fill: #cbd5e1;
+  font-size: 11px;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
 .org-panel ul {
   margin: 8px 0 0;
   padding-left: 18px;

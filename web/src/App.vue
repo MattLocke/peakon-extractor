@@ -55,6 +55,7 @@ const selectedOrgDepartments = ref([]);
 const orgMapManagerFocus = ref("");
 const orgLayoutMode = ref("hierarchy");
 const orgClusterBy = ref("department");
+const orgClusterSpread = ref(1.8);
 const orgMapZoom = ref(1);
 const orgPanX = ref(0);
 const orgPanY = ref(0);
@@ -126,7 +127,7 @@ const clusterNodes = computed(() => {
 
   const groupEntries = Array.from(groups.entries()).sort((a, b) => b[1].length - a[1].length);
   const groupCount = Math.max(1, groupEntries.length);
-  const centerRadius = 360;
+  const centerRadius = 260 + orgClusterSpread.value * 260;
   const out = [];
 
   groupEntries.forEach(([groupKey, nodes], gi) => {
@@ -137,7 +138,7 @@ const clusterNodes = computed(() => {
     nodes.forEach((node) => {
       const seed = hashSeed(`${groupKey}:${node.id}`);
       const angle = ((seed % 3600) / 3600) * 2 * Math.PI;
-      const localR = 20 + (seed % 160) + Math.sqrt(nodes.length) * 6;
+      const localR = 16 + (seed % 130) + Math.sqrt(nodes.length) * 5;
       out.push({
         ...node,
         x: cx + Math.cos(angle) * localR,
@@ -148,6 +149,29 @@ const clusterNodes = computed(() => {
     });
   });
 
+  return out;
+});
+
+const clusterGroups = computed(() => {
+  const groups = new Map();
+  for (const node of clusterNodes.value) {
+    const key = node.groupKey || "Unassigned";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(node);
+  }
+  const out = [];
+  groups.forEach((nodes, key) => {
+    const count = nodes.length;
+    const cx = nodes.reduce((sum, n) => sum + n.x, 0) / Math.max(count, 1);
+    const cy = nodes.reduce((sum, n) => sum + n.y, 0) / Math.max(count, 1);
+    let maxR = 30;
+    for (const n of nodes) {
+      const dx = n.x - cx;
+      const dy = n.y - cy;
+      maxR = Math.max(maxR, Math.sqrt(dx * dx + dy * dy));
+    }
+    out.push({ key, count, cx, cy, r: maxR + 24, color: groupColor(key) });
+  });
   return out;
 });
 
@@ -737,6 +761,15 @@ onBeforeUnmount(() => {
           </select>
         </label>
         <label>
+          Cluster spread
+          <select v-model.number="orgClusterSpread" :disabled="orgLayoutMode !== 'cluster'">
+            <option :value="1.2">Tight</option>
+            <option :value="1.8">Balanced</option>
+            <option :value="2.5">Wide</option>
+            <option :value="3.2">Very wide</option>
+          </select>
+        </label>
+        <label>
           Zoom
           <select v-model.number="orgMapZoom">
             <option :value="0.5">50%</option>
@@ -818,6 +851,29 @@ onBeforeUnmount(() => {
           @pointerup="onOrgPointerUp"
           @pointerleave="onOrgPointerUp"
         >
+          <g v-if="orgLayoutMode === 'cluster'">
+            <g v-for="group in clusterGroups" :key="`group-${group.key}`">
+              <circle
+                :cx="orgNodeX({ x: group.cx, y: 0 })"
+                :cy="orgNodeY({ x: 0, y: group.cy })"
+                :r="Math.max(22, group.r * orgMapZoom)"
+                :fill="group.color"
+                fill-opacity="0.08"
+                :stroke="group.color"
+                stroke-opacity="0.45"
+                stroke-width="2"
+                stroke-dasharray="6 6"
+              />
+              <text
+                :x="orgNodeX({ x: group.cx, y: 0 })"
+                :y="orgNodeY({ x: 0, y: group.cy }) - Math.max(26, group.r * orgMapZoom + 8)"
+                class="org-group-label"
+              >
+                {{ group.key }} ({{ group.count }})
+              </text>
+            </g>
+          </g>
+
           <line
             v-for="edge in edgesToRender"
             :key="`${edge.source}-${edge.target}`"
