@@ -48,6 +48,7 @@ const orgMapManagerFocus = ref("");
 const orgMapZoom = ref(1);
 const orgPanX = ref(0);
 const orgPanY = ref(0);
+const orgCanvasRef = ref(null);
 const orgDragging = ref(false);
 const orgDidDrag = ref(false);
 const selectedOrgNodeId = ref("");
@@ -381,6 +382,34 @@ function onOrgPointerUp() {
   }, 0);
 }
 
+function clampZoom(value) {
+  return Math.max(0.4, Math.min(3, value));
+}
+
+function onOrgWheel(event) {
+  if (activeView.value !== "org_map") return;
+  event.preventDefault();
+
+  const svg = orgCanvasRef.value;
+  if (!svg) return;
+
+  const rect = svg.getBoundingClientRect();
+  const pointerX = event.clientX - rect.left;
+  const pointerY = event.clientY - rect.top;
+
+  const oldZoom = orgMapZoom.value;
+  const zoomFactor = event.deltaY < 0 ? 1.1 : 0.9;
+  const newZoom = clampZoom(oldZoom * zoomFactor);
+  if (newZoom === oldZoom) return;
+
+  const worldX = (pointerX - 700 - orgPanX.value) / oldZoom;
+  const worldY = (pointerY - 700 - orgPanY.value) / oldZoom;
+
+  orgMapZoom.value = newZoom;
+  orgPanX.value = pointerX - 700 - worldX * newZoom;
+  orgPanY.value = pointerY - 700 - worldY * newZoom;
+}
+
 function onOrgNodeClick(nodeId) {
   if (orgDidDrag.value) return;
   selectedOrgNodeId.value = nodeId;
@@ -576,9 +605,11 @@ onMounted(() => load());
     <section v-else-if="activeView === 'org_map'" class="org-layout">
       <div class="org-canvas-wrap card">
         <svg
+          ref="orgCanvasRef"
           class="org-canvas"
           :class="{ dragging: orgDragging }"
           viewBox="0 0 1400 1400"
+          @wheel="onOrgWheel"
           @pointerdown="onOrgPointerDown"
           @pointermove="onOrgPointerMove"
           @pointerup="onOrgPointerUp"
