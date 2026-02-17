@@ -247,10 +247,30 @@ button:disabled {
   gap: 16px;
 }
 
+.org-layout.fullscreen {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  margin: 0;
+  padding: 12px;
+  background: #0f172a;
+  align-items: stretch;
+}
+
 .org-canvas-wrap {
   padding: 8px;
   overflow: auto;
   min-height: 640px;
+}
+
+.org-layout.fullscreen .org-canvas-wrap {
+  min-height: 0;
+  height: calc(100vh - 24px);
+}
+
+.org-layout.fullscreen .org-panel {
+  height: calc(100vh - 24px);
+  overflow: auto;
 }
 
 .org-canvas {
@@ -261,6 +281,10 @@ button:disabled {
   cursor: grab;
   user-select: none;
   touch-action: none;
+}
+
+.org-layout.fullscreen .org-canvas {
+  height: calc(100vh - 56px);
 }
 
 .org-canvas.dragging {

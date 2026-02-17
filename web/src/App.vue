@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 const views = [
@@ -49,6 +49,8 @@ const orgMapZoom = ref(1);
 const orgPanX = ref(0);
 const orgPanY = ref(0);
 const orgCanvasRef = ref(null);
+const orgMapContainerRef = ref(null);
+const orgFullscreen = ref(false);
 const orgDragging = ref(false);
 const orgDidDrag = ref(false);
 const selectedOrgNodeId = ref("");
@@ -354,6 +356,25 @@ function resetOrgPan() {
   orgPanY.value = 0;
 }
 
+function onFullscreenChange() {
+  orgFullscreen.value = document.fullscreenElement === orgMapContainerRef.value;
+}
+
+async function toggleOrgFullscreen() {
+  const target = orgMapContainerRef.value;
+  if (!target) return;
+
+  if (document.fullscreenElement === target) {
+    await document.exitFullscreen();
+    return;
+  }
+
+  if (document.fullscreenElement) {
+    await document.exitFullscreen();
+  }
+  await target.requestFullscreen();
+}
+
 function onOrgPointerDown(event) {
   if (event.button !== 0) return;
   orgDragging.value = true;
@@ -383,7 +404,8 @@ function onOrgPointerUp() {
 }
 
 function clampZoom(value) {
-  return Math.max(0.4, Math.min(3, value));
+  // lower bound only; no upper cap so zoom-in is effectively unbounded.
+  return Math.max(0.05, value);
 }
 
 function onOrgWheel(event) {
@@ -431,7 +453,14 @@ function nextPage() {
 
 watch([activeView, limit], () => resetAndLoad());
 
-onMounted(() => load());
+onMounted(() => {
+  document.addEventListener("fullscreenchange", onFullscreenChange);
+  load();
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("fullscreenchange", onFullscreenChange);
+});
 </script>
 
 <template>
@@ -581,6 +610,7 @@ onMounted(() => load());
         <button v-if="activeView === 'org_map'" @click="focusOnSelectedManager" :disabled="!selectedOrgNodeId">Focus selected subtree</button>
         <button v-if="activeView === 'org_map'" @click="clearOrgFocus" :disabled="!orgMapManagerFocus">Clear focus</button>
         <button v-if="activeView === 'org_map'" @click="resetOrgPan">Recenter</button>
+        <button v-if="activeView === 'org_map'" @click="toggleOrgFullscreen">{{ orgFullscreen ? 'Exit fullscreen' : 'Fullscreen' }}</button>
       </div>
     </section>
 
@@ -602,7 +632,7 @@ onMounted(() => load());
     <section v-if="loading" class="status">Loading…</section>
     <section v-else-if="error" class="status error">{{ error }}</section>
 
-    <section v-else-if="activeView === 'org_map'" class="org-layout">
+    <section ref="orgMapContainerRef" v-else-if="activeView === 'org_map'" :class="['org-layout', { fullscreen: orgFullscreen }]">
       <div class="org-canvas-wrap card">
         <svg
           ref="orgCanvasRef"
