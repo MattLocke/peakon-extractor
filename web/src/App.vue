@@ -60,6 +60,8 @@ const orgHideUnassigned = ref(true);
 const orgTreeSeparateDepartments = ref(true);
 const orgTreeSpreadX = ref(2.4);
 const orgTreeSpreadY = ref(4.8);
+const knnK = ref(5);
+const knnProfile = ref("all");
 const orgMapZoom = ref(1);
 const orgPanX = ref(0);
 const orgPanY = ref(0);
@@ -247,7 +249,7 @@ const treeNodes = computed(() => {
 });
 
 const nodesToRender = computed(() => {
-  if (orgLayoutMode.value === "cluster") return clusterNodes.value;
+  if (orgLayoutMode.value === "cluster" || orgLayoutMode.value === "knn") return clusterNodes.value;
   if (orgLayoutMode.value === "hierarchy_tree") return treeNodes.value;
   return filteredOrgNodes.value;
 });
@@ -258,7 +260,80 @@ const filteredOrgEdges = computed(() =>
     (edge) => filteredOrgNodeIds.value.has(edge.source) && filteredOrgNodeIds.value.has(edge.target)
   )
 );
-const edgesToRender = computed(() => (orgLayoutMode.value === "cluster" ? [] : filteredOrgEdges.value));
+function knnTokens(node) {
+  const tokens = [];
+  const add = (k, v) => {
+    if (v === undefined || v === null) return;
+    const s = String(v).trim().toLowerCase();
+    if (!s) return;
+    tokens.push(`${k}:${s}`);
+  };
+
+  if (knnProfile.value === "all" || knnProfile.value === "org") {
+    add("department", node.department);
+    add("subDepartment", node.subDepartment);
+    add("manager", node.managerId);
+    add("depth", node.depth);
+  }
+  if (knnProfile.value === "all" || knnProfile.value === "geo") {
+    add("country", node.country);
+  }
+  if (knnProfile.value === "all" || knnProfile.value === "title") {
+    add("title", node.title);
+  }
+  return new Set(tokens);
+}
+
+function knnSimilarity(a, b) {
+  const ta = knnTokens(a);
+  const tb = knnTokens(b);
+  const union = new Set([...ta, ...tb]);
+  if (!union.size) return 0;
+  let inter = 0;
+  ta.forEach((t) => {
+    if (tb.has(t)) inter += 1;
+  });
+  return inter / union.size;
+}
+
+const knnMap = computed(() => {
+  if (orgLayoutMode.value !== "knn") return new Map();
+  const map = new Map();
+  const nodes = nodesToRender.value;
+  const k = Math.max(1, Math.min(20, Number(knnK.value) || 5));
+
+  nodes.forEach((node) => {
+    const ranked = nodes
+      .filter((other) => other.id !== node.id)
+      .map((other) => ({ id: other.id, score: knnSimilarity(node, other) }))
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, k);
+    map.set(node.id, ranked);
+  });
+  return map;
+});
+
+const knnEdges = computed(() => {
+  if (orgLayoutMode.value !== "knn") return [];
+  const out = [];
+  const dedupe = new Set();
+  knnMap.value.forEach((neighbors, sourceId) => {
+    neighbors.forEach((n) => {
+      const key = [sourceId, n.id].sort().join("::");
+      if (dedupe.has(key)) return;
+      dedupe.add(key);
+      out.push({ source: sourceId, target: n.id, score: n.score });
+    });
+  });
+  return out;
+});
+
+const edgesToRender = computed(() => {
+  if (orgLayoutMode.value === "cluster") return [];
+  if (orgLayoutMode.value === "knn") return knnEdges.value;
+  return filteredOrgEdges.value;
+});
 const treeDepartmentOutlines = computed(() => {
   if (orgLayoutMode.value !== "hierarchy_tree") return [];
 
@@ -314,6 +389,16 @@ const orgSelectedChainEdgeKeys = computed(() => {
   return keys;
 });
 
+const selectedKnnNeighbors = computed(() => {
+  const out = new Set();
+  const selectedId = selectedOrgNodeId.value;
+  if (!selectedId || orgLayoutMode.value !== "knn") return out;
+  for (const n of knnMap.value.get(selectedId) || []) {
+    out.add(n.id);
+  }
+  return out;
+});
+
 function orgBaseX() {
   return 700;
 }
@@ -331,7 +416,9 @@ function orgNodeY(node) {
 }
 
 function orgNodeRadius(node) {
-  const base = selectedOrgNodeId.value === node.id ? 10 : 7;
+  const isSelected = selectedOrgNodeId.value === node.id;
+  const isKnnNeighbor = orgLayoutMode.value === "knn" && selectedKnnNeighbors.value.has(node.id);
+  const base = isSelected ? 10 : (isKnnNeighbor ? 8 : 7);
   return Math.max(4, base + Math.min(4, (node.directReports || 0) / 5));
 }
 
@@ -342,6 +429,10 @@ function showOrgLabels() {
 
 function orgNodeFill(node) {
   if (selectedOrgNodeId.value === node.id) return "#22c55e";
+  if (orgLayoutMode.value === "knn") {
+    if (selectedKnnNeighbors.value.has(node.id)) return "#f59e0b";
+    return node.groupColor || groupColor(clusterKeyForNode(node));
+  }
   if (orgLayoutMode.value === "cluster") return node.groupColor || groupColor(clusterKeyForNode(node));
   if (orgSelectedChainIds.value.has(node.id)) return "#38bdf8";
   return "#60a5fa";
@@ -875,6 +966,7 @@ onBeforeUnmount(() => {
             <option value="hierarchy_tree">Hierarchy tree</option>
             <option value="hierarchy">Hierarchy radial</option>
             <option value="cluster">Clustered groups</option>
+            <option value="knn">KNN similarity</option>
           </select>
         </label>
         <label>
@@ -889,11 +981,30 @@ onBeforeUnmount(() => {
         </label>
         <label>
           Cluster spread
-          <select v-model.number="orgClusterSpread" :disabled="orgLayoutMode !== 'cluster'">
+          <select v-model.number="orgClusterSpread" :disabled="orgLayoutMode !== 'cluster' && orgLayoutMode !== 'knn'">
             <option :value="1.2">Tight</option>
             <option :value="1.8">Balanced</option>
             <option :value="2.5">Wide</option>
             <option :value="3.2">Very wide</option>
+          </select>
+        </label>
+        <label>
+          K neighbors
+          <select v-model.number="knnK" :disabled="orgLayoutMode !== 'knn'">
+            <option :value="3">3</option>
+            <option :value="5">5</option>
+            <option :value="8">8</option>
+            <option :value="12">12</option>
+            <option :value="16">16</option>
+          </select>
+        </label>
+        <label>
+          KNN feature profile
+          <select v-model="knnProfile" :disabled="orgLayoutMode !== 'knn'">
+            <option value="all">All (org + title + geo)</option>
+            <option value="org">Org structure</option>
+            <option value="title">Title-centric</option>
+            <option value="geo">Location-centric</option>
           </select>
         </label>
         <label>
@@ -1005,7 +1116,7 @@ onBeforeUnmount(() => {
           @pointerup="onOrgPointerUp"
           @pointerleave="onOrgPointerUp"
         >
-          <g v-if="orgLayoutMode === 'cluster'">
+          <g v-if="orgLayoutMode === 'cluster' || orgLayoutMode === 'knn'">
             <g v-for="group in clusterGroups" :key="`group-${group.key}`">
               <circle
                 :cx="orgNodeX({ x: group.cx, y: 0 })"
@@ -1061,8 +1172,13 @@ onBeforeUnmount(() => {
             :y1="orgNodeY(orgNodeById.get(edge.source) || {})"
             :x2="orgNodeX(orgNodeById.get(edge.target) || {})"
             :y2="orgNodeY(orgNodeById.get(edge.target) || {})"
-            :stroke="orgSelectedChainEdgeKeys.has(`${edge.source}-${edge.target}`) ? '#22c55e' : '#334155'"
-            :stroke-width="orgSelectedChainEdgeKeys.has(`${edge.source}-${edge.target}`) ? 2.4 : (orgLayoutMode === 'hierarchy_tree' ? 1.4 : 1)"
+            :stroke="orgLayoutMode === 'knn'
+              ? ((selectedOrgNodeId && (edge.source === selectedOrgNodeId || edge.target === selectedOrgNodeId)) ? '#f59e0b' : '#475569')
+              : (orgSelectedChainEdgeKeys.has(`${edge.source}-${edge.target}`) ? '#22c55e' : '#334155')"
+            :stroke-width="orgLayoutMode === 'knn'
+              ? (0.8 + ((edge.score || 0) * 2.6))
+              : (orgSelectedChainEdgeKeys.has(`${edge.source}-${edge.target}`) ? 2.4 : (orgLayoutMode === 'hierarchy_tree' ? 1.4 : 1))"
+            :stroke-opacity="orgLayoutMode === 'knn' ? (0.25 + ((edge.score || 0) * 0.7)) : 1"
           />
           <g
             v-for="node in nodesToRender"
@@ -1100,7 +1216,16 @@ onBeforeUnmount(() => {
           <button @click="focusOnSelectedManager">Focus this subtree</button>
         </div>
 
-        <div>
+        <div v-if="orgLayoutMode === 'knn'">
+          <strong>Nearest neighbors (k={{ knnK }}):</strong>
+          <ul>
+            <li v-for="n in (knnMap.get(selectedOrgNode.id) || [])" :key="`knn-${selectedOrgNode.id}-${n.id}`">
+              {{ orgNodeById.get(n.id)?.label || n.id }} — {{ (n.score * 100).toFixed(0) }}%
+            </li>
+          </ul>
+        </div>
+
+        <div v-else>
           <strong>Chain to root:</strong>
           <ul>
             <li v-for="node in orgParentChain(selectedOrgNode.id)" :key="`chain-${node.id}`">
