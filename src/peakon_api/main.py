@@ -705,6 +705,7 @@ def list_employee_birthdays(
     employees = list(db.employees.find(query, {"_id": 1, "attributes": 1}))
     grouped: Dict[str, List[Dict[str, Any]]] = {}
     with_birthdays = 0
+    source = "employees"
 
     for employee in employees:
         mmdd = _employee_birthday_mmdd(employee)
@@ -723,6 +724,40 @@ def list_employee_birthdays(
                 "birthday": mmdd,
             }
         )
+
+    # Fallback: some datasets carry birthday-like values only in answers_export attrs.
+    if with_birthdays == 0:
+        source = "answers_export_fallback"
+        emp_lookup = {str(emp.get("_id")): emp for emp in employees}
+        seen_emp_ids: set[str] = set()
+        cursor = db.answers_export.find({}, {"attributes": 1})
+        for doc in cursor:
+            attrs = (doc or {}).get("attributes") or {}
+            emp_id_raw = attrs.get("employeeId") or attrs.get("employee_id")
+            if emp_id_raw is None:
+                continue
+            emp_id = str(emp_id_raw)
+            if emp_id in seen_emp_ids:
+                continue
+
+            mmdd = _employee_birthday_mmdd({"attributes": attrs})
+            if not mmdd:
+                continue
+
+            seen_emp_ids.add(emp_id)
+            with_birthdays += 1
+            employee = emp_lookup.get(emp_id)
+            department_name = _employee_department(employee or {}) or "Unassigned"
+            if department_name == "Unassigned" and not include_unassigned:
+                continue
+
+            grouped.setdefault(department_name, []).append(
+                {
+                    "id": emp_id,
+                    "name": _employee_name(employee or {}) or emp_id,
+                    "birthday": mmdd,
+                }
+            )
 
     def _mmdd_key(value: str) -> tuple[int, int]:
         month, day = value.split("/")
@@ -743,6 +778,7 @@ def list_employee_birthdays(
         "stats": {
             "employeesScanned": len(employees),
             "employeesWithBirthday": with_birthdays,
+            "source": source,
         },
     }
 
