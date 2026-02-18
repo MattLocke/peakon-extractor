@@ -112,6 +112,12 @@ input {
   gap: 6px;
 }
 
+.row-inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .chip {
   font-size: 12px;
   padding: 4px 8px;

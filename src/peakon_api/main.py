@@ -195,40 +195,119 @@ def _employee_department(employee: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _parse_month_name(month_raw: str) -> Optional[int]:
+    m = month_raw.strip().lower()
+    months = {
+        "january": 1,
+        "jan": 1,
+        "february": 2,
+        "feb": 2,
+        "march": 3,
+        "mar": 3,
+        "april": 4,
+        "apr": 4,
+        "may": 5,
+        "june": 6,
+        "jun": 6,
+        "july": 7,
+        "jul": 7,
+        "august": 8,
+        "aug": 8,
+        "september": 9,
+        "sep": 9,
+        "sept": 9,
+        "october": 10,
+        "oct": 10,
+        "november": 11,
+        "nov": 11,
+        "december": 12,
+        "dec": 12,
+    }
+    return months.get(m)
+
+
+def _parse_birthday_value(raw: Any) -> Optional[str]:
+    if raw is None:
+        return None
+
+    # Occasionally date-like values are nested
+    if isinstance(raw, dict):
+        for key in ("value", "date", "raw", "display", "formatted"):
+            if key in raw:
+                parsed = _parse_birthday_value(raw.get(key))
+                if parsed:
+                    return parsed
+        return None
+
+    s = str(raw).strip()
+    if not s:
+        return None
+
+    # ISO-like (YYYY-MM-DD or YYYY/MM/DD)
+    iso = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$", s)
+    if iso:
+        month = int(iso.group(2))
+        day = int(iso.group(3))
+        if 1 <= month <= 12 and 1 <= day <= 31:
+            return f"{month:02d}/{day:02d}"
+
+    # Slash dates, possibly MM/DD[/YYYY] or DD/MM[/YYYY]
+    slash = re.match(r"^(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?$", s)
+    if slash:
+        a = int(slash.group(1))
+        b = int(slash.group(2))
+        # Prefer MM/DD when valid; fallback to DD/MM when first part > 12
+        if 1 <= a <= 12 and 1 <= b <= 31:
+            return f"{a:02d}/{b:02d}"
+        if 1 <= b <= 12 and 1 <= a <= 31:
+            return f"{b:02d}/{a:02d}"
+
+    # Month name formats: "March 7" or "7 March"
+    m1 = re.match(r"^([A-Za-z]{3,9})\s+(\d{1,2})(?:,?\s*\d{2,4})?$", s)
+    if m1:
+        month = _parse_month_name(m1.group(1))
+        day = int(m1.group(2))
+        if month and 1 <= day <= 31:
+            return f"{month:02d}/{day:02d}"
+
+    m2 = re.match(r"^(\d{1,2})\s+([A-Za-z]{3,9})(?:\s+\d{2,4})?$", s)
+    if m2:
+        day = int(m2.group(1))
+        month = _parse_month_name(m2.group(2))
+        if month and 1 <= day <= 31:
+            return f"{month:02d}/{day:02d}"
+
+    return None
+
+
 def _employee_birthday_mmdd(employee: Dict[str, Any]) -> Optional[str]:
     attrs = employee.get("attributes") or {}
-    for key in (
+
+    # 1) Try canonical/common keys first
+    preferred_keys = (
         "Birthday",
         "birthday",
         "Birth date",
         "birth_date",
         "Date of birth",
         "date_of_birth",
+        "Birthdate",
+        "birthdate",
         "DOB",
         "dob",
-    ):
-        raw = attrs.get(key)
-        if raw is None:
-            continue
-        s = str(raw).strip()
-        if not s:
-            continue
+    )
+    for key in preferred_keys:
+        parsed = _parse_birthday_value(attrs.get(key))
+        if parsed:
+            return parsed
 
-        # Try ISO-like first (YYYY-MM-DD or YYYY/MM/DD)
-        iso = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$", s)
-        if iso:
-            month = int(iso.group(2))
-            day = int(iso.group(3))
-            if 1 <= month <= 12 and 1 <= day <= 31:
-                return f"{month:02d}/{day:02d}"
-
-        # Try US-like (MM/DD[/YYYY])
-        us = re.match(r"^(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?$", s)
-        if us:
-            month = int(us.group(1))
-            day = int(us.group(2))
-            if 1 <= month <= 12 and 1 <= day <= 31:
-                return f"{month:02d}/{day:02d}"
+    # 2) Fallback: any attribute key with birth/dob in the name
+    for key, value in attrs.items():
+        lk = str(key).lower()
+        if "birth" in lk or lk == "dob":
+            parsed = _parse_birthday_value(value)
+            if parsed:
+                return parsed
 
     return None
 

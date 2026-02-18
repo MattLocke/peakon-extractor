@@ -34,6 +34,7 @@ const hasComment = ref("");
 const department = ref("");
 const subDepartment = ref("");
 const departmentInput = ref("");
+const birthdayDepartmentPick = ref("");
 const subDepartmentInput = ref("");
 const selectedDepartments = ref([]);
 const selectedSubDepartments = ref([]);
@@ -648,6 +649,12 @@ function removeChip(listRef, value) {
   listRef.value = listRef.value.filter((item) => item !== value);
 }
 
+function addSelectedDepartment() {
+  const value = String(birthdayDepartmentPick.value || "").trim();
+  if (!value) return;
+  if (!selectedDepartments.value.includes(value)) selectedDepartments.value.push(value);
+}
+
 async function updateManagerOptions() {
   if (activeView.value !== "answers_export") {
     managerOptions.value = [];
@@ -1091,11 +1098,21 @@ onBeforeUnmount(() => {
 
       <div v-else-if="activeView === 'employee_birthdays'" class="filters-row">
         <label>
-          Department filter(s)
+          Department selector
+          <div class="row-inline">
+            <select v-model="birthdayDepartmentPick">
+              <option value="">Choose department…</option>
+              <option v-for="opt in departmentOptions" :key="`bday-pick-${opt}`" :value="opt">{{ opt }}</option>
+            </select>
+            <button type="button" @click="addSelectedDepartment" :disabled="!birthdayDepartmentPick">Add</button>
+          </div>
+        </label>
+        <label>
+          Or typeahead add
           <input
             v-model="departmentInput"
             list="department-options"
-            placeholder="Add department + Enter"
+            placeholder="Type department + Enter"
             @keydown.enter.prevent="addChip(departmentInput, selectedDepartments)"
           />
           <div class="chip-row">
