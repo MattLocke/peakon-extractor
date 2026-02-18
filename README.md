@@ -43,9 +43,9 @@ docker compose up --build
 The UI talks to a small API layer at `http://localhost:8000` (configurable via `VITE_API_BASE`).
 
 Filters are available in the UI for:
-- Answers export: search text, employee ID, question ID, score range, answered date range
-- Scores contexts: grade, impact, time range
-- Scores by driver: driver ID, grade, time range
+- Answers export: search text, employee ID, question ID, score range, answered date range, department/sub-department/manager
+- Scores contexts: grade, impact, time range, department/sub-department (employee-scoped)
+- Scores by driver: driver ID, grade, time range, department/sub-department (employee-scoped)
 - Org Map Explorer: employee graph from manager relationships with search + zoom + detail panel
 
 ## Configuration

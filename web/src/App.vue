@@ -503,12 +503,18 @@ async function load() {
       if (impact.value.trim()) params.set("impact", impact.value.trim());
       if (timeFrom.value.trim()) params.set("time_from", timeFrom.value.trim());
       if (timeTo.value.trim()) params.set("time_to", timeTo.value.trim());
+      if (department.value.trim()) params.set("department", department.value.trim());
+      if (subDepartment.value.trim()) params.set("sub_department", subDepartment.value.trim());
+      if (managerId.value.trim()) params.set("manager_id", managerId.value.trim());
     }
     if (activeView.value === "scores_by_driver") {
       if (driverId.value.trim()) params.set("driver_id", driverId.value.trim());
       if (grade.value.trim()) params.set("grade", grade.value.trim());
       if (timeFrom.value.trim()) params.set("time_from", timeFrom.value.trim());
       if (timeTo.value.trim()) params.set("time_to", timeTo.value.trim());
+      if (department.value.trim()) params.set("department", department.value.trim());
+      if (subDepartment.value.trim()) params.set("sub_department", subDepartment.value.trim());
+      if (managerId.value.trim()) params.set("manager_id", managerId.value.trim());
     }
     const res = await fetch(`${API_BASE}/${activeView.value}?${params.toString()}`);
     if (!res.ok) {
@@ -1058,6 +1064,34 @@ onBeforeUnmount(() => {
         <label v-if="activeView === 'scores_contexts'">
           Impact
           <input v-model="impact" placeholder="low" />
+        </label>
+        <label>
+          Department(s)
+          <input
+            v-model="departmentInput"
+            list="department-options"
+            placeholder="Add department + Enter"
+            @keydown.enter.prevent="addChip(departmentInput, selectedDepartments)"
+          />
+          <div class="chip-row">
+            <button type="button" class="chip" v-for="dep in selectedDepartments" :key="`scores-dep-${dep}`" @click="removeChip(selectedDepartments, dep)">
+              {{ dep }} ✕
+            </button>
+          </div>
+        </label>
+        <label>
+          Sub-department(s)
+          <input
+            v-model="subDepartmentInput"
+            list="subdepartment-options"
+            placeholder="Add sub-department + Enter"
+            @keydown.enter.prevent="addChip(subDepartmentInput, selectedSubDepartments)"
+          />
+          <div class="chip-row">
+            <button type="button" class="chip" v-for="sub in selectedSubDepartments" :key="`scores-sub-${sub}`" @click="removeChip(selectedSubDepartments, sub)">
+              {{ sub }} ✕
+            </button>
+          </div>
         </label>
         <label>
           Time from

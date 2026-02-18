@@ -245,6 +245,53 @@ def _employee_filter_query(
     return {"$and": conditions}
 
 
+def _employee_ids_matching_filter(
+    department: Optional[str],
+    sub_department: Optional[str],
+    manager_id: Optional[str],
+) -> Optional[List[Any]]:
+    emp_filter = _employee_filter_query(department, sub_department, manager_id)
+    if not emp_filter:
+        return None
+
+    db = get_db()
+    raw_ids = [doc.get("_id") for doc in db.employees.find(emp_filter, {"_id": 1})]
+    if not raw_ids:
+        return []
+
+    out: List[Any] = []
+    seen: set[str] = set()
+    for rid in raw_ids:
+        if rid is None:
+            continue
+        s = str(rid)
+        if s in seen:
+            continue
+        seen.add(s)
+        out.append(rid)
+        parsed = _parse_int(s)
+        if parsed is not None and parsed != rid:
+            out.append(parsed)
+    return out
+
+
+def _apply_employee_scope_filter(
+    base_query: Dict[str, Any],
+    employee_ids: Optional[List[Any]],
+    *,
+    id_fields: List[str],
+) -> Dict[str, Any]:
+    if employee_ids is None:
+        return base_query
+    if not employee_ids:
+        return {"_id": {"$exists": False}}
+
+    id_match = {"$or": [{field: {"$in": employee_ids}} for field in id_fields]}
+    if not base_query:
+        return id_match
+    return {"$and": [base_query, id_match]}
+
+
 @app.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
@@ -397,6 +444,9 @@ def list_scores_contexts(
     impact: Optional[str] = None,
     time_from: Optional[str] = None,
     time_to: Optional[str] = None,
+    department: Optional[str] = None,
+    sub_department: Optional[str] = None,
+    manager_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     query: Dict[str, Any] = {}
     if grade:
@@ -406,6 +456,20 @@ def list_scores_contexts(
     start = _validate_iso(time_from)
     end = _validate_iso(time_to)
     query.update(_iso_range("attributes.scores.time", start, end))
+
+    employee_ids = _employee_ids_matching_filter(department, sub_department, manager_id)
+    query = _apply_employee_scope_filter(
+        query,
+        employee_ids,
+        id_fields=[
+            "attributes.employeeId",
+            "attributes.employee_id",
+            "employeeId",
+            "employee_id",
+            "attributes.respondentEmployeeId",
+            "attributes.respondent_employee_id",
+        ],
+    )
     return _list_collection("scores_contexts", limit=limit, skip=skip, filter_query=query)
 
 
@@ -417,6 +481,9 @@ def list_scores_by_driver(
     grade: Optional[str] = None,
     time_from: Optional[str] = None,
     time_to: Optional[str] = None,
+    department: Optional[str] = None,
+    sub_department: Optional[str] = None,
+    manager_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     query: Dict[str, Any] = {}
     if driver_id:
@@ -426,6 +493,20 @@ def list_scores_by_driver(
     start = _validate_iso(time_from)
     end = _validate_iso(time_to)
     query.update(_iso_range("attributes.scores.time", start, end))
+
+    employee_ids = _employee_ids_matching_filter(department, sub_department, manager_id)
+    query = _apply_employee_scope_filter(
+        query,
+        employee_ids,
+        id_fields=[
+            "attributes.employeeId",
+            "attributes.employee_id",
+            "employeeId",
+            "employee_id",
+            "attributes.respondentEmployeeId",
+            "attributes.respondent_employee_id",
+        ],
+    )
     return _list_collection("scores_by_driver", limit=limit, skip=skip, filter_query=query)
 
 
