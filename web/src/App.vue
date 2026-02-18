@@ -37,6 +37,7 @@ const departmentInput = ref("");
 const birthdayDepartmentPick = ref("");
 const subDepartmentInput = ref("");
 const selectedDepartments = ref([]);
+const birthdaySelectedDepartments = ref([]);
 const selectedSubDepartments = ref([]);
 const managerId = ref("");
 const grade = ref("");
@@ -113,9 +114,10 @@ const filteredOrgNodes = computed(() => {
 });
 
 const filteredBirthdayGroups = computed(() => {
-  const monthFilter = String(birthdayMonth.value || "").trim().padStart(2, "0");
+  const rawMonth = String(birthdayMonth.value || "").trim();
+  const monthFilter = rawMonth ? rawMonth.padStart(2, "0") : "";
   const nameQuery = String(birthdayNameSearch.value || "").trim().toLowerCase();
-  const deptFilters = new Set(selectedDepartments.value.map((d) => String(d).trim().toLowerCase()).filter(Boolean));
+  const deptFilters = new Set(birthdaySelectedDepartments.value.map((d) => String(d).trim().toLowerCase()).filter(Boolean));
 
   const out = [];
   for (const group of birthdayGroups.value || []) {
@@ -685,16 +687,14 @@ function removeChip(listRef, value) {
 function addSelectedDepartment() {
   const value = String(birthdayDepartmentPick.value || "").trim();
   if (!value) return;
-  if (!selectedDepartments.value.includes(value)) selectedDepartments.value.push(value);
+  if (!birthdaySelectedDepartments.value.includes(value)) birthdaySelectedDepartments.value.push(value);
 }
 
 function resetBirthdayFilters() {
-  selectedDepartments.value = [];
-  department.value = "";
+  birthdaySelectedDepartments.value = [];
   birthdayMonth.value = "";
   birthdayNameSearch.value = "";
   birthdayDepartmentPick.value = "";
-  departmentInput.value = "";
 }
 
 async function updateManagerOptions() {
@@ -1149,19 +1149,10 @@ onBeforeUnmount(() => {
             <button type="button" @click="addSelectedDepartment" :disabled="!birthdayDepartmentPick">Add</button>
           </div>
           <div class="chip-row">
-            <button type="button" class="chip" v-for="dep in selectedDepartments" :key="`bday-dep-${dep}`" @click="removeChip(selectedDepartments, dep)">
+            <button type="button" class="chip" v-for="dep in birthdaySelectedDepartments" :key="`bday-dep-${dep}`" @click="removeChip(birthdaySelectedDepartments, dep)">
               {{ dep }} ✕
             </button>
           </div>
-        </label>
-        <label>
-          Or typeahead add
-          <input
-            v-model="departmentInput"
-            list="department-options"
-            placeholder="Type department + Enter"
-            @keydown.enter.prevent="addChip(departmentInput, selectedDepartments)"
-          />
         </label>
         <label>
           Month
