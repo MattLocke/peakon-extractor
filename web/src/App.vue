@@ -52,6 +52,7 @@ const subDepartmentOptions = ref([]);
 const orgMap = ref({ nodes: [], edges: [], stats: {}, rootId: null });
 const birthdayGroups = ref([]);
 const birthdaysTotal = ref(0);
+const birthdaysStats = ref({ employeesScanned: 0, employeesWithBirthday: 0 });
 const orgMapSearch = ref("");
 const debouncedOrgMapSearch = ref("");
 const orgMapDepartment = ref("");
@@ -485,6 +486,7 @@ async function load() {
       };
       birthdayGroups.value = [];
       birthdaysTotal.value = 0;
+      birthdaysStats.value = { employeesScanned: 0, employeesWithBirthday: 0 };
       items.value = [];
       total.value = orgMap.value.nodes.length;
       uniqueEmployees.value = orgMap.value.nodes.length;
@@ -505,6 +507,7 @@ async function load() {
       const payload = await res.json();
       birthdayGroups.value = payload.departments || [];
       birthdaysTotal.value = payload.total || 0;
+      birthdaysStats.value = payload.stats || { employeesScanned: 0, employeesWithBirthday: 0 };
       items.value = [];
       total.value = birthdaysTotal.value;
       uniqueEmployees.value = birthdaysTotal.value;
@@ -561,6 +564,7 @@ async function load() {
     items.value = [];
     birthdayGroups.value = [];
     birthdaysTotal.value = 0;
+    birthdaysStats.value = { employeesScanned: 0, employeesWithBirthday: 0 };
     total.value = 0;
     uniqueEmployees.value = 0;
     managerOptions.value = [];
@@ -1208,6 +1212,7 @@ onBeforeUnmount(() => {
     <section v-else class="pager">
       <span>{{ birthdaysTotal }} employees with birthdays</span>
       <span>{{ birthdayGroups.length }} departments</span>
+      <span>Scanned {{ birthdaysStats.employeesScanned || 0 }} employees</span>
     </section>
 
     <section v-if="loading" class="status">Loading…</section>

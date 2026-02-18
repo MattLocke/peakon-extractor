@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 from typing import Any, Dict, List, Optional
 
@@ -238,6 +238,20 @@ def _parse_birthday_value(raw: Any) -> Optional[str]:
                 if parsed:
                     return parsed
         return None
+
+    # Numeric timestamps (seconds/ms since epoch)
+    if isinstance(raw, (int, float)):
+        try:
+            value = float(raw)
+            # Ignore plain ages/small integers; accept only realistic epoch ranges.
+            if value < 100_000_000:
+                return None
+            if value > 10_000_000_000:  # probably milliseconds
+                value /= 1000.0
+            dt = datetime.fromtimestamp(value, tz=timezone.utc)
+            return dt.strftime("%m/%d")
+        except Exception:
+            return None
 
     s = str(raw).strip()
     if not s:
@@ -672,7 +686,7 @@ def employee_facets() -> Dict[str, List[str]]:
 @app.get("/employees/birthdays")
 def list_employee_birthdays(
     department: Optional[str] = None,
-    include_unassigned: bool = False,
+    include_unassigned: bool = True,
 ) -> Dict[str, Any]:
     db = get_db()
     query: Dict[str, Any] = {}
@@ -687,11 +701,13 @@ def list_employee_birthdays(
 
     employees = list(db.employees.find(query, {"_id": 1, "attributes": 1}))
     grouped: Dict[str, List[Dict[str, Any]]] = {}
+    with_birthdays = 0
 
     for employee in employees:
         mmdd = _employee_birthday_mmdd(employee)
         if not mmdd:
             continue
+        with_birthdays += 1
 
         department_name = _employee_department(employee) or "Unassigned"
         if department_name == "Unassigned" and not include_unassigned:
@@ -718,7 +734,14 @@ def list_employee_birthdays(
         departments.append({"department": dept_name, "count": len(employees_sorted), "employees": employees_sorted})
 
     total = sum(item["count"] for item in departments)
-    return {"departments": departments, "total": total}
+    return {
+        "departments": departments,
+        "total": total,
+        "stats": {
+            "employeesScanned": len(employees),
+            "employeesWithBirthday": with_birthdays,
+        },
+    }
 
 
 @app.get("/employees/{employee_id}")
