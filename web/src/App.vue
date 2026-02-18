@@ -57,8 +57,9 @@ const orgLayoutMode = ref("hierarchy_tree");
 const orgClusterBy = ref("department");
 const orgClusterSpread = ref(1.8);
 const orgHideUnassigned = ref(true);
-const orgTreeSpreadX = ref(1.6);
-const orgTreeSpreadY = ref(2.4);
+const orgTreeSeparateDepartments = ref(true);
+const orgTreeSpreadX = ref(2.4);
+const orgTreeSpreadY = ref(4.8);
 const orgMapZoom = ref(1);
 const orgPanX = ref(0);
 const orgPanY = ref(0);
@@ -219,20 +220,28 @@ const treeNodes = computed(() => {
 
   roots.forEach((rootId) => place(rootId));
 
-  const xGap = 52 + orgTreeSpreadX.value * 48;
-  const yGap = 180 + orgTreeSpreadY.value * 180;
+  const xGap = 52 + orgTreeSpreadX.value * 56;
+  const yGap = 220 + orgTreeSpreadY.value * 220;
   const values = Array.from(pos.values());
   const minX = values.length ? Math.min(...values.map((v) => v.x)) : 0;
   const maxX = values.length ? Math.max(...values.map((v) => v.x)) : 0;
   const centerX = (minX + maxX) / 2;
 
+  const deptList = Array.from(
+    new Set(nodes.map((n) => String(n.department || n.subDepartment || "Unassigned").trim()))
+  ).sort();
+  const deptIndex = new Map(deptList.map((d, i) => [d, i]));
+  const deptGap = 260 + orgTreeSpreadY.value * 180;
+
   return nodes.map((n) => {
     const p = pos.get(n.id) || { x: 0 };
     const d = Number.isFinite(Number(n.depth)) ? Number(n.depth) : 0;
+    const deptKey = String(n.department || n.subDepartment || "Unassigned").trim();
+    const deptOffset = orgTreeSeparateDepartments.value ? (deptIndex.get(deptKey) || 0) * deptGap : 0;
     return {
       ...n,
       x: (p.x - centerX) * xGap,
-      y: d * yGap,
+      y: d * yGap + deptOffset,
     };
   });
 });
@@ -919,6 +928,10 @@ onBeforeUnmount(() => {
         <label class="toggle-inline">
           <input type="checkbox" v-model="orgHideUnassigned" />
           Hide unassigned dept
+        </label>
+        <label class="toggle-inline" v-if="orgLayoutMode === 'hierarchy_tree'">
+          <input type="checkbox" v-model="orgTreeSeparateDepartments" />
+          Separate dept bands
         </label>
       </div>
 
