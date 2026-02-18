@@ -53,6 +53,8 @@ const orgMap = ref({ nodes: [], edges: [], stats: {}, rootId: null });
 const birthdayGroups = ref([]);
 const birthdaysTotal = ref(0);
 const birthdaysStats = ref({ employeesScanned: 0, employeesWithBirthday: 0 });
+const birthdayMonth = ref("");
+const birthdayNameSearch = ref("");
 const orgMapSearch = ref("");
 const debouncedOrgMapSearch = ref("");
 const orgMapDepartment = ref("");
@@ -109,6 +111,35 @@ const filteredOrgNodes = computed(() => {
       .some((v) => String(v).toLowerCase().includes(q));
   });
 });
+
+const filteredBirthdayGroups = computed(() => {
+  const monthFilter = String(birthdayMonth.value || "").trim().padStart(2, "0");
+  const nameQuery = String(birthdayNameSearch.value || "").trim().toLowerCase();
+  const deptFilters = new Set(selectedDepartments.value.map((d) => String(d).trim().toLowerCase()).filter(Boolean));
+
+  const out = [];
+  for (const group of birthdayGroups.value || []) {
+    const deptName = String(group.department || "Unassigned");
+    if (deptFilters.size && !deptFilters.has(deptName.toLowerCase())) continue;
+
+    const employees = (group.employees || []).filter((emp) => {
+      const b = String(emp.birthday || "");
+      const m = b.includes("/") ? b.split("/")[0].padStart(2, "0") : "";
+      if (monthFilter && m !== monthFilter) return false;
+      if (nameQuery && !String(emp.name || "").toLowerCase().includes(nameQuery)) return false;
+      return true;
+    });
+
+    if (employees.length) {
+      out.push({ ...group, count: employees.length, employees });
+    }
+  }
+  return out;
+});
+
+const filteredBirthdaysTotal = computed(() =>
+  filteredBirthdayGroups.value.reduce((sum, g) => sum + (g.count || 0), 0)
+);
 
 function hashSeed(input) {
   const s = String(input || "");
@@ -497,9 +528,7 @@ async function load() {
     }
 
     if (activeView.value === "employee_birthdays") {
-      const birthdayParams = new URLSearchParams();
-      if (department.value.trim()) birthdayParams.set("department", department.value.trim());
-      const res = await fetch(`${API_BASE}/employees/birthdays?${birthdayParams.toString()}`);
+      const res = await fetch(`${API_BASE}/employees/birthdays`);
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || `HTTP ${res.status}`);
@@ -657,6 +686,15 @@ function addSelectedDepartment() {
   const value = String(birthdayDepartmentPick.value || "").trim();
   if (!value) return;
   if (!selectedDepartments.value.includes(value)) selectedDepartments.value.push(value);
+}
+
+function resetBirthdayFilters() {
+  selectedDepartments.value = [];
+  department.value = "";
+  birthdayMonth.value = "";
+  birthdayNameSearch.value = "";
+  birthdayDepartmentPick.value = "";
+  departmentInput.value = "";
 }
 
 async function updateManagerOptions() {
@@ -1110,6 +1148,11 @@ onBeforeUnmount(() => {
             </select>
             <button type="button" @click="addSelectedDepartment" :disabled="!birthdayDepartmentPick">Add</button>
           </div>
+          <div class="chip-row">
+            <button type="button" class="chip" v-for="dep in selectedDepartments" :key="`bday-dep-${dep}`" @click="removeChip(selectedDepartments, dep)">
+              {{ dep }} ✕
+            </button>
+          </div>
         </label>
         <label>
           Or typeahead add
@@ -1119,11 +1162,28 @@ onBeforeUnmount(() => {
             placeholder="Type department + Enter"
             @keydown.enter.prevent="addChip(departmentInput, selectedDepartments)"
           />
-          <div class="chip-row">
-            <button type="button" class="chip" v-for="dep in selectedDepartments" :key="`bday-dep-${dep}`" @click="removeChip(selectedDepartments, dep)">
-              {{ dep }} ✕
-            </button>
-          </div>
+        </label>
+        <label>
+          Month
+          <select v-model="birthdayMonth">
+            <option value="">All months</option>
+            <option value="01">January</option>
+            <option value="02">February</option>
+            <option value="03">March</option>
+            <option value="04">April</option>
+            <option value="05">May</option>
+            <option value="06">June</option>
+            <option value="07">July</option>
+            <option value="08">August</option>
+            <option value="09">September</option>
+            <option value="10">October</option>
+            <option value="11">November</option>
+            <option value="12">December</option>
+          </select>
+        </label>
+        <label>
+          Name contains
+          <input v-model="birthdayNameSearch" placeholder="Type a name" />
         </label>
       </div>
 
@@ -1186,7 +1246,8 @@ onBeforeUnmount(() => {
       </datalist>
 
       <div class="action-row">
-        <button class="primary" @click="resetAndLoad">Apply</button>
+        <button class="primary" @click="resetAndLoad">{{ activeView === 'employee_birthdays' ? 'Refresh data' : 'Apply' }}</button>
+        <button v-if="activeView === 'employee_birthdays'" @click="resetBirthdayFilters">Reset filters</button>
         <button v-if="activeView === 'org_map'" @click="focusOnSelectedManager" :disabled="!selectedOrgNodeId">Focus selected subtree</button>
         <button v-if="activeView === 'org_map'" @click="clearOrgFocus" :disabled="!orgMapManagerFocus">Clear focus</button>
         <button v-if="activeView === 'org_map'" @click="resetOrgPan">Recenter</button>
@@ -1210,8 +1271,8 @@ onBeforeUnmount(() => {
     </section>
 
     <section v-else class="pager">
-      <span>{{ birthdaysTotal }} employees with birthdays</span>
-      <span>{{ birthdayGroups.length }} departments</span>
+      <span>{{ filteredBirthdaysTotal }} employees with birthdays</span>
+      <span>{{ filteredBirthdayGroups.length }} departments</span>
       <span>Scanned {{ birthdaysStats.employeesScanned || 0 }} employees</span>
     </section>
 
@@ -1352,7 +1413,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section v-else-if="activeView === 'employee_birthdays'" class="list">
-      <article v-for="group in birthdayGroups" :key="`birthday-group-${group.department}`" class="card">
+      <article v-for="group in filteredBirthdayGroups" :key="`birthday-group-${group.department}`" class="card">
         <div class="card-header">
           <div>
             <div class="id">{{ group.department }}</div>
@@ -1364,7 +1425,7 @@ onBeforeUnmount(() => {
           <span>{{ emp.name }}</span>
         </div>
       </article>
-      <article v-if="birthdayGroups.length === 0" class="card">
+      <article v-if="filteredBirthdayGroups.length === 0" class="card">
         <div class="card-row">
           <span>No birthdays found for current filters.</span>
         </div>
