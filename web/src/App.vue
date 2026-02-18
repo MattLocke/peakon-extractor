@@ -49,6 +49,7 @@ const departmentOptions = ref([]);
 const subDepartmentOptions = ref([]);
 const orgMap = ref({ nodes: [], edges: [], stats: {}, rootId: null });
 const orgMapSearch = ref("");
+const debouncedOrgMapSearch = ref("");
 const orgMapDepartment = ref("");
 const orgMapDepartmentInput = ref("");
 const selectedOrgDepartments = ref([]);
@@ -72,6 +73,7 @@ const orgDragging = ref(false);
 const orgDidDrag = ref(false);
 const selectedOrgNodeId = ref("");
 let managerRequestId = 0;
+let orgSearchDebounceTimer = null;
 let orgDragStartX = 0;
 let orgDragStartY = 0;
 let orgPanStartX = 0;
@@ -91,7 +93,7 @@ const selectedOrgNode = computed(() => {
 });
 
 const filteredOrgNodes = computed(() => {
-  const q = orgMapSearch.value.trim().toLowerCase();
+  const q = debouncedOrgMapSearch.value.trim().toLowerCase();
   return orgMap.value.nodes.filter((node) => {
     if (orgHideUnassigned.value && (!node.department || String(node.department).trim() === "")) {
       return false;
@@ -816,16 +818,27 @@ watch(selectedOrgDepartments, (vals) => {
   orgMapDepartment.value = vals.join(",");
 });
 
+watch(orgMapSearch, (value) => {
+  if (orgSearchDebounceTimer) {
+    clearTimeout(orgSearchDebounceTimer);
+  }
+  orgSearchDebounceTimer = setTimeout(() => {
+    debouncedOrgMapSearch.value = value;
+  }, 250);
+});
+
 watch([activeView, limit], () => resetAndLoad());
 
 onMounted(() => {
   document.addEventListener("fullscreenchange", onFullscreenChange);
+  debouncedOrgMapSearch.value = orgMapSearch.value;
   loadEmployeeFacets();
   load();
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener("fullscreenchange", onFullscreenChange);
+  if (orgSearchDebounceTimer) clearTimeout(orgSearchDebounceTimer);
 });
 </script>
 
