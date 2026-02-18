@@ -309,6 +309,9 @@ def _employee_birthday_mmdd(employee: Dict[str, Any]) -> Optional[str]:
         "birthdate",
         "DOB",
         "dob",
+        # Some Peakon exports/custom mappings store birth date in an "age" field.
+        "Age",
+        "age",
     )
     for key in preferred_keys:
         parsed = _parse_birthday_value(attrs.get(key))
