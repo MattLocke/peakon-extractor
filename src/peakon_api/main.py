@@ -195,6 +195,44 @@ def _employee_department(employee: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _employee_birthday_mmdd(employee: Dict[str, Any]) -> Optional[str]:
+    attrs = employee.get("attributes") or {}
+    for key in (
+        "Birthday",
+        "birthday",
+        "Birth date",
+        "birth_date",
+        "Date of birth",
+        "date_of_birth",
+        "DOB",
+        "dob",
+    ):
+        raw = attrs.get(key)
+        if raw is None:
+            continue
+        s = str(raw).strip()
+        if not s:
+            continue
+
+        # Try ISO-like first (YYYY-MM-DD or YYYY/MM/DD)
+        iso = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$", s)
+        if iso:
+            month = int(iso.group(2))
+            day = int(iso.group(3))
+            if 1 <= month <= 12 and 1 <= day <= 31:
+                return f"{month:02d}/{day:02d}"
+
+        # Try US-like (MM/DD[/YYYY])
+        us = re.match(r"^(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?$", s)
+        if us:
+            month = int(us.group(1))
+            day = int(us.group(2))
+            if 1 <= month <= 12 and 1 <= day <= 31:
+                return f"{month:02d}/{day:02d}"
+
+    return None
+
+
 def _csv_values(raw: Optional[str]) -> List[str]:
     if not raw:
         return []
@@ -550,6 +588,58 @@ def employee_facets() -> Dict[str, List[str]]:
         "departments": department_values,
         "sub_departments": sub_department_values,
     }
+
+
+@app.get("/employees/birthdays")
+def list_employee_birthdays(
+    department: Optional[str] = None,
+    include_unassigned: bool = False,
+) -> Dict[str, Any]:
+    db = get_db()
+    query: Dict[str, Any] = {}
+
+    department_values = _csv_values(department)
+    if department_values:
+        query["$or"] = []
+        for dep in department_values:
+            pattern = {"$regex": re.escape(dep), "$options": "i"}
+            query["$or"].append({"attributes.Department": pattern})
+            query["$or"].append({"attributes.department": pattern})
+
+    employees = list(db.employees.find(query, {"_id": 1, "attributes": 1}))
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+
+    for employee in employees:
+        mmdd = _employee_birthday_mmdd(employee)
+        if not mmdd:
+            continue
+
+        department_name = _employee_department(employee) or "Unassigned"
+        if department_name == "Unassigned" and not include_unassigned:
+            continue
+
+        grouped.setdefault(department_name, []).append(
+            {
+                "id": str(employee.get("_id")),
+                "name": _employee_name(employee) or str(employee.get("_id")),
+                "birthday": mmdd,
+            }
+        )
+
+    def _mmdd_key(value: str) -> tuple[int, int]:
+        month, day = value.split("/")
+        return (int(month), int(day))
+
+    departments = []
+    for dept_name in sorted(grouped.keys()):
+        employees_sorted = sorted(
+            grouped[dept_name],
+            key=lambda e: (_mmdd_key(e["birthday"]), str(e.get("name") or "").lower()),
+        )
+        departments.append({"department": dept_name, "count": len(employees_sorted), "employees": employees_sorted})
+
+    total = sum(item["count"] for item in departments)
+    return {"departments": departments, "total": total}
 
 
 @app.get("/employees/{employee_id}")

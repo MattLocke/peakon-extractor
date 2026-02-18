@@ -47,6 +47,7 @@ Filters are available in the UI for:
 - Scores contexts: grade, impact, time range, department/sub-department (employee-scoped)
 - Scores by driver: driver ID, grade, time range, department/sub-department (employee-scoped)
 - Org Map Explorer: employee graph from manager relationships with search + zoom + detail panel
+- Employee Birthdays: month/day birthday list grouped by department (year intentionally omitted)
 
 ## Configuration
 

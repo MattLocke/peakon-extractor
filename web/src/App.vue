@@ -7,6 +7,7 @@ const views = [
   { id: "scores_contexts", label: "Scores Contexts" },
   { id: "scores_by_driver", label: "Scores By Driver" },
   { id: "org_map", label: "Org Map Explorer" },
+  { id: "employee_birthdays", label: "Employee Birthdays" },
 ];
 
 const activeView = ref("answers_export");
@@ -48,6 +49,8 @@ const managerCache = ref(new Map());
 const departmentOptions = ref([]);
 const subDepartmentOptions = ref([]);
 const orgMap = ref({ nodes: [], edges: [], stats: {}, rootId: null });
+const birthdayGroups = ref([]);
+const birthdaysTotal = ref(0);
 const orgMapSearch = ref("");
 const debouncedOrgMapSearch = ref("");
 const orgMapDepartment = ref("");
@@ -479,12 +482,31 @@ async function load() {
         stats: payload.stats || {},
         rootId: payload.rootId || null,
       };
+      birthdayGroups.value = [];
+      birthdaysTotal.value = 0;
       items.value = [];
       total.value = orgMap.value.nodes.length;
       uniqueEmployees.value = orgMap.value.nodes.length;
       if (!selectedOrgNodeId.value && orgMap.value.rootId) {
         selectedOrgNodeId.value = orgMap.value.rootId;
       }
+      return;
+    }
+
+    if (activeView.value === "employee_birthdays") {
+      const birthdayParams = new URLSearchParams();
+      if (department.value.trim()) birthdayParams.set("department", department.value.trim());
+      const res = await fetch(`${API_BASE}/employees/birthdays?${birthdayParams.toString()}`);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      const payload = await res.json();
+      birthdayGroups.value = payload.departments || [];
+      birthdaysTotal.value = payload.total || 0;
+      items.value = [];
+      total.value = birthdaysTotal.value;
+      uniqueEmployees.value = birthdaysTotal.value;
       return;
     }
     if (activeView.value === "answers_export") {
@@ -536,6 +558,8 @@ async function load() {
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
     items.value = [];
+    birthdayGroups.value = [];
+    birthdaysTotal.value = 0;
     total.value = 0;
     uniqueEmployees.value = 0;
     managerOptions.value = [];
@@ -1065,6 +1089,23 @@ onBeforeUnmount(() => {
         </label>
       </div>
 
+      <div v-else-if="activeView === 'employee_birthdays'" class="filters-row">
+        <label>
+          Department filter(s)
+          <input
+            v-model="departmentInput"
+            list="department-options"
+            placeholder="Add department + Enter"
+            @keydown.enter.prevent="addChip(departmentInput, selectedDepartments)"
+          />
+          <div class="chip-row">
+            <button type="button" class="chip" v-for="dep in selectedDepartments" :key="`bday-dep-${dep}`" @click="removeChip(selectedDepartments, dep)">
+              {{ dep }} ✕
+            </button>
+          </div>
+        </label>
+      </div>
+
       <div v-else class="filters-row">
         <label v-if="activeView === 'scores_by_driver'">
           Driver ID
@@ -1132,7 +1173,7 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section v-if="activeView !== 'org_map'" class="pager">
+    <section v-if="activeView !== 'org_map' && activeView !== 'employee_birthdays'" class="pager">
       <button :disabled="!hasPrev || loading" @click="prevPage">Prev</button>
       <span>{{ pageRange }}</span>
       <span v-if="activeView === 'answers_export'">
@@ -1141,10 +1182,15 @@ onBeforeUnmount(() => {
       <button :disabled="!hasNext || loading" @click="nextPage">Next</button>
     </section>
 
-    <section v-else class="pager">
+    <section v-else-if="activeView === 'org_map'" class="pager">
       <span>{{ nodesToRender.length }} shown / {{ orgMap.stats?.employees || 0 }} total employees</span>
       <span>Depth {{ orgMap.stats?.maxDepth ?? 0 }}</span>
       <span>Orphans {{ orgMap.stats?.orphans ?? 0 }}</span>
+    </section>
+
+    <section v-else class="pager">
+      <span>{{ birthdaysTotal }} employees with birthdays</span>
+      <span>{{ birthdayGroups.length }} departments</span>
     </section>
 
     <section v-if="loading" class="status">Loading…</section>
@@ -1281,6 +1327,26 @@ onBeforeUnmount(() => {
           </ul>
         </div>
       </aside>
+    </section>
+
+    <section v-else-if="activeView === 'employee_birthdays'" class="list">
+      <article v-for="group in birthdayGroups" :key="`birthday-group-${group.department}`" class="card">
+        <div class="card-header">
+          <div>
+            <div class="id">{{ group.department }}</div>
+            <div class="meta">{{ group.count }} birthdays</div>
+          </div>
+        </div>
+        <div class="card-row" v-for="emp in group.employees" :key="`birthday-emp-${group.department}-${emp.id}`">
+          <span class="label">{{ emp.birthday }}</span>
+          <span>{{ emp.name }}</span>
+        </div>
+      </article>
+      <article v-if="birthdayGroups.length === 0" class="card">
+        <div class="card-row">
+          <span>No birthdays found for current filters.</span>
+        </div>
+      </article>
     </section>
 
     <section v-else class="list">
