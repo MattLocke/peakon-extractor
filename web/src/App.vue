@@ -448,6 +448,19 @@ const treeDepartmentOutlines = computed(() => {
   });
   return outlines.sort((a, b) => a.key.localeCompare(b.key));
 });
+
+const radialDepartmentLegend = computed(() => {
+  if (!(orgLayoutMode.value === "hierarchy" && orgHierarchyGroupByDepartment.value)) return [];
+  const counts = new Map();
+  for (const node of nodesToRender.value) {
+    const key = String(node.department || node.subDepartment || "Unassigned").trim() || "Unassigned";
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([key, count]) => ({ key, count, color: groupColor(key) }))
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+});
+
 const orgSelectedChainIds = computed(() => {
   if (!selectedOrgNodeId.value) return new Set();
   return new Set(orgParentChain(selectedOrgNodeId.value).map((n) => n.id));
@@ -1422,32 +1435,45 @@ onBeforeUnmount(() => {
         </svg>
       </div>
 
-      <aside class="org-panel card" v-if="selectedOrgNode">
-        <h3>{{ selectedOrgNode.label }}</h3>
-        <p class="subtle">ID: {{ selectedOrgNode.id }}</p>
-        <p><strong>Dept:</strong> {{ selectedOrgNode.department || '—' }}</p>
-        <p><strong>Title:</strong> {{ selectedOrgNode.title || '—' }}</p>
-        <p><strong>Email:</strong> {{ selectedOrgNode.email || '—' }}</p>
-        <p><strong>Direct reports:</strong> {{ selectedOrgNode.directReports ?? 0 }}</p>
-        <p><strong>Subtree size:</strong> {{ selectedOrgNode.subtreeSize ?? 1 }}</p>
-        <div class="action-row compact">
-          <button @click="focusOnSelectedManager">Focus this subtree</button>
-        </div>
+      <aside class="org-panel card" v-if="selectedOrgNode || radialDepartmentLegend.length">
+        <template v-if="selectedOrgNode">
+          <h3>{{ selectedOrgNode.label }}</h3>
+          <p class="subtle">ID: {{ selectedOrgNode.id }}</p>
+          <p><strong>Dept:</strong> {{ selectedOrgNode.department || '—' }}</p>
+          <p><strong>Title:</strong> {{ selectedOrgNode.title || '—' }}</p>
+          <p><strong>Email:</strong> {{ selectedOrgNode.email || '—' }}</p>
+          <p><strong>Direct reports:</strong> {{ selectedOrgNode.directReports ?? 0 }}</p>
+          <p><strong>Subtree size:</strong> {{ selectedOrgNode.subtreeSize ?? 1 }}</p>
+          <div class="action-row compact">
+            <button @click="focusOnSelectedManager">Focus this subtree</button>
+          </div>
 
-        <div v-if="orgLayoutMode === 'knn'">
-          <strong>Nearest neighbors (k={{ knnK }}):</strong>
-          <ul>
-            <li v-for="n in (knnMap.get(selectedOrgNode.id) || [])" :key="`knn-${selectedOrgNode.id}-${n.id}`">
-              {{ orgNodeById.get(n.id)?.label || n.id }} — {{ (n.score * 100).toFixed(0) }}%
-            </li>
-          </ul>
-        </div>
+          <div v-if="orgLayoutMode === 'knn'">
+            <strong>Nearest neighbors (k={{ knnK }}):</strong>
+            <ul>
+              <li v-for="n in (knnMap.get(selectedOrgNode.id) || [])" :key="`knn-${selectedOrgNode.id}-${n.id}`">
+                {{ orgNodeById.get(n.id)?.label || n.id }} — {{ (n.score * 100).toFixed(0) }}%
+              </li>
+            </ul>
+          </div>
 
-        <div v-else>
-          <strong>Chain to root:</strong>
+          <div v-else>
+            <strong>Chain to root:</strong>
+            <ul>
+              <li v-for="node in orgParentChain(selectedOrgNode.id)" :key="`chain-${node.id}`">
+                {{ node.label }} ({{ node.id }})
+              </li>
+            </ul>
+          </div>
+        </template>
+
+        <div v-if="radialDepartmentLegend.length" class="org-legend">
+          <strong>Department legend</strong>
           <ul>
-            <li v-for="node in orgParentChain(selectedOrgNode.id)" :key="`chain-${node.id}`">
-              {{ node.label }} ({{ node.id }})
+            <li v-for="entry in radialDepartmentLegend" :key="`legend-${entry.key}`" class="org-legend-row">
+              <span class="org-legend-dot" :style="{ backgroundColor: entry.color }"></span>
+              <span>{{ entry.key }}</span>
+              <span class="subtle">{{ entry.count }}</span>
             </li>
           </ul>
         </div>
