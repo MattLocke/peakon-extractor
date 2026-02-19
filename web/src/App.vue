@@ -67,6 +67,8 @@ const orgClusterBy = ref("department");
 const orgClusterSpread = ref(1.8);
 const orgHideUnassigned = ref(true);
 const orgTreeSeparateDepartments = ref(true);
+const orgHierarchyGroupByDepartment = ref(true);
+const orgRadialLayerGap = ref(1.2);
 const orgTreeSpreadX = ref(2.4);
 const orgTreeSpreadY = ref(4.8);
 const knnK = ref(5);
@@ -288,9 +290,41 @@ const treeNodes = computed(() => {
   });
 });
 
+const radialDepartmentNodes = computed(() => {
+  const nodes = filteredOrgNodes.value;
+  const deptKeys = Array.from(
+    new Set(nodes.map((n) => String(n.department || n.subDepartment || "Unassigned").trim() || "Unassigned"))
+  ).sort();
+  const deptCount = Math.max(1, deptKeys.length);
+  const deptIndex = new Map(deptKeys.map((k, i) => [k, i]));
+
+  return nodes.map((n) => {
+    const d = Math.max(0, Number.isFinite(Number(n.depth)) ? Number(n.depth) : 0);
+    if (d === 0) {
+      return { ...n, x: 0, y: 0 };
+    }
+
+    const deptKey = String(n.department || n.subDepartment || "Unassigned").trim() || "Unassigned";
+    const idx = deptIndex.get(deptKey) || 0;
+    const baseAngle = (2 * Math.PI * idx) / deptCount;
+    const sectorWidth = ((2 * Math.PI) / deptCount) * 0.82;
+    const seed = hashSeed(`${deptKey}:${n.id}`);
+    const offset = ((seed % 1000) / 999 - 0.5) * sectorWidth;
+    const angle = baseAngle + offset;
+
+    const radius = d * (120 + orgRadialLayerGap.value * 95);
+    return {
+      ...n,
+      x: Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius,
+    };
+  });
+});
+
 const nodesToRender = computed(() => {
   if (orgLayoutMode.value === "cluster" || orgLayoutMode.value === "knn") return clusterNodes.value;
   if (orgLayoutMode.value === "hierarchy_tree") return treeNodes.value;
+  if (orgLayoutMode.value === "hierarchy" && orgHierarchyGroupByDepartment.value) return radialDepartmentNodes.value;
   return filteredOrgNodes.value;
 });
 const orgNodeById = computed(() => new Map(nodesToRender.value.map((n) => [n.id, n])));
@@ -474,6 +508,9 @@ function orgNodeFill(node) {
     return node.groupColor || groupColor(clusterKeyForNode(node));
   }
   if (orgLayoutMode.value === "cluster") return node.groupColor || groupColor(clusterKeyForNode(node));
+  if (orgLayoutMode.value === "hierarchy" && orgHierarchyGroupByDepartment.value) {
+    return groupColor(node.department || node.subDepartment || "Unassigned");
+  }
   if (orgSelectedChainIds.value.has(node.id)) return "#38bdf8";
   return "#60a5fa";
 }
@@ -1081,6 +1118,15 @@ onBeforeUnmount(() => {
           </select>
         </label>
         <label>
+          Radial layer gap
+          <select v-model.number="orgRadialLayerGap" :disabled="orgLayoutMode !== 'hierarchy' || !orgHierarchyGroupByDepartment">
+            <option :value="0.8">Tight</option>
+            <option :value="1.2">Balanced</option>
+            <option :value="1.8">Wide</option>
+            <option :value="2.4">Very wide</option>
+          </select>
+        </label>
+        <label>
           K neighbors
           <select v-model.number="knnK" :disabled="orgLayoutMode !== 'knn'">
             <option :value="3">3</option>
@@ -1131,6 +1177,10 @@ onBeforeUnmount(() => {
         <label class="toggle-inline">
           <input type="checkbox" v-model="orgHideUnassigned" />
           Hide unassigned dept
+        </label>
+        <label class="toggle-inline" v-if="orgLayoutMode === 'hierarchy'">
+          <input type="checkbox" v-model="orgHierarchyGroupByDepartment" />
+          Group radial by dept + colorize
         </label>
         <label class="toggle-inline" v-if="orgLayoutMode === 'hierarchy_tree'">
           <input type="checkbox" v-model="orgTreeSeparateDepartments" />
