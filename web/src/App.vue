@@ -156,8 +156,12 @@ function hashSeed(input) {
 }
 
 function groupColor(groupKey) {
-  const palette = ["#60a5fa", "#f59e0b", "#22c55e", "#f472b6", "#a78bfa", "#fb7185", "#34d399", "#facc15"];
-  return palette[hashSeed(groupKey) % palette.length];
+  // Generate many distinct, deterministic colors so large orgs don't repeat quickly.
+  const seed = hashSeed(groupKey || "group");
+  const hue = (seed * 137.508) % 360; // golden-angle spread
+  const sat = 62 + (seed % 14); // 62-75%
+  const light = 52 + ((seed >> 4) % 10); // 52-61%
+  return `hsl(${hue.toFixed(1)} ${sat}% ${light}%)`;
 }
 
 function clusterKeyForNode(node) {
