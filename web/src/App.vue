@@ -1571,10 +1571,6 @@ onBeforeUnmount(() => {
             <span class="badge score">{{ item?.attributes?.answerScore ?? "n/a" }}</span>
           </div>
           <div class="card-row">
-            <span class="label">Employee</span>
-            <span>{{ item?.attributes?.employeeId || "—" }}</span>
-          </div>
-          <div class="card-row">
             <span class="label">Question</span>
             <span>{{ item?.attributes?.questionText || "—" }}</span>
           </div>
