@@ -1174,12 +1174,15 @@ onBeforeUnmount(() => {
         </label>
         <label>
           Department(s)
-          <input
-            v-model="departmentInput"
-            list="department-options"
-            placeholder="Add department + Enter"
-            @keydown.enter.prevent="addChip(departmentInput, selectedDepartments)"
-          />
+          <div class="row-inline">
+            <input
+              v-model="departmentInput"
+              list="department-options"
+              placeholder="Add department"
+              @keydown.enter.prevent="addChip(departmentInput, selectedDepartments)"
+            />
+            <button type="button" @click="addChip(departmentInput, selectedDepartments)" :disabled="!departmentInput.trim()">Add</button>
+          </div>
           <div class="chip-row">
             <button type="button" class="chip" v-for="dep in selectedDepartments" :key="`dep-${dep}`" @click="removeChip(selectedDepartments, dep)">
               {{ dep }} ✕
@@ -1188,12 +1191,15 @@ onBeforeUnmount(() => {
         </label>
         <label>
           Sub-department(s)
-          <input
-            v-model="subDepartmentInput"
-            list="subdepartment-options"
-            placeholder="Add sub-department + Enter"
-            @keydown.enter.prevent="addChip(subDepartmentInput, selectedSubDepartments)"
-          />
+          <div class="row-inline">
+            <input
+              v-model="subDepartmentInput"
+              list="subdepartment-options"
+              placeholder="Add sub-department"
+              @keydown.enter.prevent="addChip(subDepartmentInput, selectedSubDepartments)"
+            />
+            <button type="button" @click="addChip(subDepartmentInput, selectedSubDepartments)" :disabled="!subDepartmentInput.trim()">Add</button>
+          </div>
           <div class="chip-row">
             <button type="button" class="chip" v-for="sub in selectedSubDepartments" :key="`sub-${sub}`" @click="removeChip(selectedSubDepartments, sub)">
               {{ sub }} ✕
@@ -1394,12 +1400,15 @@ onBeforeUnmount(() => {
         </label>
         <label>
           Department(s)
-          <input
-            v-model="departmentInput"
-            list="department-options"
-            placeholder="Add department + Enter"
-            @keydown.enter.prevent="addChip(departmentInput, selectedDepartments)"
-          />
+          <div class="row-inline">
+            <input
+              v-model="departmentInput"
+              list="department-options"
+              placeholder="Add department"
+              @keydown.enter.prevent="addChip(departmentInput, selectedDepartments)"
+            />
+            <button type="button" @click="addChip(departmentInput, selectedDepartments)" :disabled="!departmentInput.trim()">Add</button>
+          </div>
           <div class="chip-row">
             <button type="button" class="chip" v-for="dep in selectedDepartments" :key="`scores-dep-${dep}`" @click="removeChip(selectedDepartments, dep)">
               {{ dep }} ✕
@@ -1408,12 +1417,15 @@ onBeforeUnmount(() => {
         </label>
         <label>
           Sub-department(s)
-          <input
-            v-model="subDepartmentInput"
-            list="subdepartment-options"
-            placeholder="Add sub-department + Enter"
-            @keydown.enter.prevent="addChip(subDepartmentInput, selectedSubDepartments)"
-          />
+          <div class="row-inline">
+            <input
+              v-model="subDepartmentInput"
+              list="subdepartment-options"
+              placeholder="Add sub-department"
+              @keydown.enter.prevent="addChip(subDepartmentInput, selectedSubDepartments)"
+            />
+            <button type="button" @click="addChip(subDepartmentInput, selectedSubDepartments)" :disabled="!subDepartmentInput.trim()">Add</button>
+          </div>
           <div class="chip-row">
             <button type="button" class="chip" v-for="sub in selectedSubDepartments" :key="`scores-sub-${sub}`" @click="removeChip(selectedSubDepartments, sub)">
               {{ sub }} ✕
