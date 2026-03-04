@@ -21,6 +21,7 @@ const employeeErrors = ref(new Map());
 const hoverEmployeeId = ref("");
 const hoverLoading = ref(false);
 const loading = ref(false);
+const exportingCsv = ref(false);
 const error = ref("");
 const driverId = ref("");
 const search = ref("");
@@ -544,6 +545,118 @@ function orgParentChain(nodeId) {
     current = byId.get(current.parentId);
   }
   return chain;
+}
+
+function buildAnswersParams({ includePaging = true, skipOverride, limitOverride, includeManager = true } = {}) {
+  const params = new URLSearchParams();
+  if (includePaging) {
+    params.set("limit", String(limitOverride ?? limit.value));
+    params.set("skip", String(skipOverride ?? skip.value));
+  }
+  if (search.value.trim()) params.set("search", search.value.trim());
+  if (employeeId.value.trim()) params.set("employee_id", employeeId.value.trim());
+  if (questionId.value.trim()) params.set("question_id", questionId.value.trim());
+  if (minScore.value.trim()) params.set("min_score", minScore.value.trim());
+  if (maxScore.value.trim()) params.set("max_score", maxScore.value.trim());
+  if (answeredFrom.value.trim()) params.set("answered_from", answeredFrom.value.trim());
+  if (answeredTo.value.trim()) params.set("answered_to", answeredTo.value.trim());
+  if (hasComment.value) params.set("has_comment", hasComment.value);
+  if (department.value.trim()) params.set("department", department.value.trim());
+  if (subDepartment.value.trim()) params.set("sub_department", subDepartment.value.trim());
+  if (includeManager && managerId.value.trim()) params.set("manager_id", managerId.value.trim());
+  return params;
+}
+
+function csvCell(value) {
+  const text = value == null ? "" : String(value);
+  if (/[,"\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+function answersToCsv(rows) {
+  const headers = [
+    "answerId",
+    "employeeId",
+    "answerScore",
+    "questionId",
+    "questionText",
+    "answerComment",
+    "responseAnsweredAt",
+    "department",
+    "subDepartment",
+    "managerId",
+    "country",
+    "compGrade",
+  ];
+
+  const lines = [headers.join(",")];
+  for (const item of rows) {
+    const employeeIdValue = item?.attributes?.employeeId || "";
+    const record = employeeRecord(employeeIdValue);
+    const line = [
+      item?.attributes?.answerId || item?._id || "",
+      employeeIdValue,
+      item?.attributes?.answerScore ?? "",
+      item?.attributes?.questionId ?? "",
+      item?.attributes?.questionText || "",
+      item?.attributes?.answerComment || "",
+      item?.attributes?.responseAnsweredAt || "",
+      record?.attributes?.Department || record?.attributes?.department || "",
+      record?.attributes?.["Sub-Department"] || record?.attributes?.sub_department || record?.attributes?.["sub-department"] || "",
+      employeeManagerId(employeeIdValue) === "—" ? "" : employeeManagerId(employeeIdValue),
+      record?.attributes?.Country || record?.attributes?.country || "",
+      record?.attributes?.["Compensation Grade"] || record?.attributes?.compensation_grade || "",
+    ];
+    lines.push(line.map(csvCell).join(","));
+  }
+
+  return lines.join("\n");
+}
+
+async function exportFilteredAnswersCsv() {
+  if (activeView.value !== "answers_export" || exportingCsv.value) return;
+  exportingCsv.value = true;
+  error.value = "";
+  try {
+    const pageSize = 500;
+    let cursor = 0;
+    let expectedTotal = null;
+    const allItems = [];
+
+    while (expectedTotal === null || cursor < expectedTotal) {
+      const params = buildAnswersParams({ includePaging: true, skipOverride: cursor, limitOverride: pageSize });
+      const res = await fetch(`${API_BASE}/answers_export?${params.toString()}`);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      const payload = await res.json();
+      const chunk = payload.items || [];
+      if (expectedTotal === null) expectedTotal = payload.total || 0;
+      allItems.push(...chunk);
+      if (!chunk.length) break;
+      cursor += chunk.length;
+    }
+
+    const employeeIds = Array.from(new Set(allItems.map((it) => it?.attributes?.employeeId).filter(Boolean)));
+    await Promise.all(employeeIds.map((id) => fetchEmployeeCached(id, { silent: true })));
+
+    const csv = answersToCsv(allItems);
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `answers-export-${stamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    exportingCsv.value = false;
+  }
 }
 
 async function load() {
@@ -1305,6 +1418,9 @@ onBeforeUnmount(() => {
 
       <div class="action-row">
         <button class="primary" @click="resetAndLoad">{{ activeView === 'employee_birthdays' ? 'Refresh data' : 'Apply' }}</button>
+        <button v-if="activeView === 'answers_export'" @click="exportFilteredAnswersCsv" :disabled="exportingCsv || loading">
+          {{ exportingCsv ? 'Exporting CSV…' : 'Export filtered CSV' }}
+        </button>
         <button v-if="activeView === 'employee_birthdays'" @click="resetBirthdayFilters">Reset filters</button>
         <button v-if="activeView === 'org_map'" @click="focusOnSelectedManager" :disabled="!selectedOrgNodeId">Focus selected subtree</button>
         <button v-if="activeView === 'org_map'" @click="clearOrgFocus" :disabled="!orgMapManagerFocus">Clear focus</button>
