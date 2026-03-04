@@ -177,6 +177,11 @@ button:disabled {
   padding: 16px;
 }
 
+.card.card-low-sentiment {
+  background: linear-gradient(180deg, #2a161b 0%, #1e293b 45%);
+  border-color: #7f1d1d;
+}
+
 .card-header {
   display: flex;
   justify-content: space-between;
@@ -198,8 +203,21 @@ button:disabled {
   font-size: 11px;
 }
 
-.badge.score {
+.badge.score.score-good {
   background: #16a34a;
+}
+
+.badge.score.score-mid {
+  background: #eab308;
+  color: #1f2937;
+}
+
+.badge.score.score-low {
+  background: #dc2626;
+}
+
+.badge.score.score-neutral {
+  background: #64748b;
 }
 
 .meta {

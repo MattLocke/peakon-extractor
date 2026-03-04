@@ -840,6 +840,27 @@ function displayEmail() {
   return ANON_EMAIL;
 }
 
+function answerScoreValue(item) {
+  const raw = item?.attributes?.answerScore;
+  const score = Number(raw);
+  return Number.isFinite(score) ? score : null;
+}
+
+function answerScoreClass(item) {
+  const score = answerScoreValue(item);
+  if (score == null) return "score-neutral";
+  if (score >= 8) return "score-good";
+  if (score >= 5) return "score-mid";
+  return "score-low";
+}
+
+function answerCardClass(item) {
+  if (activeView.value !== "answers_export") return "";
+  const score = answerScoreValue(item);
+  if (score == null) return "";
+  return score <= 4 ? "card-low-sentiment" : "";
+}
+
 function addChip(inputRef, listRef) {
   const value = String(inputRef.value || "").trim();
   if (!value) return;
@@ -1624,7 +1645,7 @@ onBeforeUnmount(() => {
       <article
         v-for="item in items"
         :key="item._id"
-        class="card"
+        :class="['card', answerCardClass(item)]"
       >
         <div v-if="activeView === 'answers_export'" class="card-grid">
           <div class="card-header">
@@ -1684,7 +1705,7 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </div>
-            <span class="badge score">{{ item?.attributes?.answerScore ?? "n/a" }}</span>
+            <span :class="['badge', 'score', answerScoreClass(item)]">{{ item?.attributes?.answerScore ?? "n/a" }}</span>
           </div>
           <div class="card-row">
             <span class="label">Question</span>
