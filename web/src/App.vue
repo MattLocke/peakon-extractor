@@ -151,6 +151,47 @@ const filteredBirthdaysTotal = computed(() =>
   filteredBirthdayGroups.value.reduce((sum, g) => sum + (g.count || 0), 0)
 );
 
+const orgHeadcountVisibleIds = computed(() => {
+  const selected = String(managerId.value || "").trim();
+  if (!selected) return null;
+  const rows = orgHeadcount.value.rows || [];
+  const byParent = new Map();
+  for (const row of rows) {
+    const parent = String(row.managerId || "");
+    if (!byParent.has(parent)) byParent.set(parent, []);
+    byParent.get(parent).push(String(row.id || ""));
+  }
+  const visible = new Set([selected]);
+  const queue = [selected];
+  while (queue.length) {
+    const current = queue.shift();
+    const kids = byParent.get(current) || [];
+    for (const kid of kids) {
+      if (!visible.has(kid)) {
+        visible.add(kid);
+        queue.push(kid);
+      }
+    }
+  }
+  return visible;
+});
+
+const orgHeadcountRowsVisible = computed(() => {
+  const ids = orgHeadcountVisibleIds.value;
+  const rows = orgHeadcount.value.rows || [];
+  if (!ids) return rows;
+  return rows.filter((row) => ids.has(String(row.id || "")));
+});
+
+const orgHeadcountManagersVisible = computed(() => {
+  const ids = orgHeadcountVisibleIds.value;
+  const all = orgHeadcount.value.managers || [];
+  if (!ids) return all;
+  return all
+    .filter((m) => ids.has(String(m.id || "")) && Number(m.directReports || 0) > 0)
+    .sort((a, b) => Number(b.teamSizeInScope || 0) - Number(a.teamSizeInScope || 0));
+});
+
 function hashSeed(input) {
   const s = String(input || "");
   let h = 2166136261;
@@ -718,11 +759,9 @@ async function load() {
     }
 
     if (activeView.value === "org_headcount") {
-      await updateOrgHeadcountManagerOptions();
       const hcParams = new URLSearchParams();
       if (department.value.trim()) hcParams.set("department", department.value.trim());
       if (subDepartment.value.trim()) hcParams.set("sub_department", subDepartment.value.trim());
-      if (managerId.value.trim()) hcParams.set("manager_id", managerId.value.trim());
       const res = await fetch(`${API_BASE}/org_headcount?${hcParams.toString()}`);
       if (!res.ok) {
         const text = await res.text();
@@ -736,6 +775,12 @@ async function load() {
         managers: payload.managers || [],
         stats: payload.stats || {},
       };
+      orgHeadcountManagerOptions.value = (payload.managers || []).map((m) => ({
+        id: String(m.id || ""),
+        name: m.name || m.id || "",
+        label: `${m.name || m.id || "Unknown"} (${m.id || ""})`,
+      })).filter((m) => m.id);
+      syncOrgHeadcountManagerSelection();
       items.value = [];
       total.value = orgHeadcount.value.totalHeadcount;
       uniqueEmployees.value = orgHeadcount.value.totalHeadcount;
@@ -926,27 +971,15 @@ function syncOrgHeadcountManagerSelection() {
   managerId.value = exact ? String(exact.id) : "";
 }
 
-async function updateOrgHeadcountManagerOptions() {
+function updateOrgHeadcountManagerOptions() {
   if (activeView.value !== "org_headcount") return;
-  orgHeadcountManagerLoading.value = true;
-  try {
-    const params = new URLSearchParams();
-    if (department.value.trim()) params.set("department", department.value.trim());
-    if (subDepartment.value.trim()) params.set("sub_department", subDepartment.value.trim());
-    const res = await fetch(`${API_BASE}/org_headcount/managers?${params.toString()}`);
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || `HTTP ${res.status}`);
-    }
-    const payload = await res.json();
-    orgHeadcountManagerOptions.value = payload.items || [];
-    syncOrgHeadcountManagerSelection();
-  } catch {
-    orgHeadcountManagerOptions.value = [];
-    managerId.value = "";
-  } finally {
-    orgHeadcountManagerLoading.value = false;
-  }
+  orgHeadcountManagerLoading.value = false;
+  orgHeadcountManagerOptions.value = (orgHeadcount.value.managers || []).map((m) => ({
+    id: String(m.id || ""),
+    name: m.name || m.id || "",
+    label: `${m.name || m.id || "Unknown"} (${m.id || ""})`,
+  })).filter((m) => m.id);
+  syncOrgHeadcountManagerSelection();
 }
 
 async function updateManagerOptions() {
@@ -1601,6 +1634,7 @@ onBeforeUnmount(() => {
     <section v-else-if="activeView === 'org_headcount'" class="pager">
       <span>Total headcount: {{ orgHeadcount.totalHeadcount || 0 }}</span>
       <span>Managers in scope: {{ orgHeadcount.managerCount || 0 }}</span>
+      <span v-if="managerId">Showing subtree headcount: {{ orgHeadcountRowsVisible.length }}</span>
       <span>Depth {{ orgHeadcount.stats?.maxDepth ?? 0 }}</span>
     </section>
 
@@ -1768,7 +1802,7 @@ onBeforeUnmount(() => {
             <div class="meta">Sorted by team size in selected scope</div>
           </div>
         </div>
-        <div v-if="(orgHeadcount.managers || []).length" class="table-wrap">
+        <div v-if="orgHeadcountManagersVisible.length" class="table-wrap">
           <table class="mini-table">
             <thead>
               <tr>
@@ -1780,7 +1814,7 @@ onBeforeUnmount(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="m in orgHeadcount.managers" :key="`mgr-${m.id}`">
+              <tr v-for="m in orgHeadcountManagersVisible" :key="`mgr-${m.id}`">
                 <td>{{ m.name }}</td>
                 <td>{{ m.teamSizeInScope }}</td>
                 <td>{{ m.directReports }}</td>
@@ -1800,7 +1834,7 @@ onBeforeUnmount(() => {
             <div class="meta">Indented by reporting depth, with counts</div>
           </div>
         </div>
-        <div v-if="(orgHeadcount.rows || []).length" class="table-wrap">
+        <div v-if="orgHeadcountRowsVisible.length" class="table-wrap">
           <table class="mini-table">
             <thead>
               <tr>
@@ -1814,7 +1848,7 @@ onBeforeUnmount(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in orgHeadcount.rows" :key="`row-${row.id}`">
+              <tr v-for="row in orgHeadcountRowsVisible" :key="`row-${row.id}`">
                 <td>
                   <span :style="{ paddingLeft: `${(row.depth || 0) * 14}px` }">{{ row.name }}</span>
                 </td>
