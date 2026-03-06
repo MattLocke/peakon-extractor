@@ -458,17 +458,17 @@ def list_answers_export(
         has_comment=has_comment,
     )
     emp_id = _parse_int(employee_id)
-    emp_filter = _employee_filter_query(department, sub_department, manager_id)
-    if emp_filter:
-        db = get_db()
-        employee_ids = [doc["_id"] for doc in db.employees.find(emp_filter, {"_id": 1})]
+    employee_scope_ids = _employee_ids_matching_filter(department, sub_department, manager_id)
+    if employee_scope_ids is not None:
         if emp_id is not None:
-            if emp_id not in employee_ids:
+            emp_match = [v for v in employee_scope_ids if _parse_int(str(v)) == emp_id or str(v) == str(emp_id)]
+            if not emp_match:
                 return {"items": [], "total": 0, "skip": skip, "limit": limit, "unique_employees": 0}
+            query = _apply_employee_scope_filter(query, emp_match, id_fields=["attributes.employeeId"])
         else:
-            if not employee_ids:
+            if not employee_scope_ids:
                 return {"items": [], "total": 0, "skip": skip, "limit": limit, "unique_employees": 0}
-            query["attributes.employeeId"] = {"$in": employee_ids}
+            query = _apply_employee_scope_filter(query, employee_scope_ids, id_fields=["attributes.employeeId"])
     result = _list_collection("answers_export", limit=limit, skip=skip, filter_query=query)
     db = get_db()
     result["unique_employees"] = len(db.answers_export.distinct("attributes.employeeId", query))
@@ -500,17 +500,18 @@ def list_answers_export_managers(
         has_comment=has_comment,
     )
     emp_id = _parse_int(employee_id)
-    emp_filter = _employee_filter_query(department, sub_department, manager_id)
+    employee_scope_ids = _employee_ids_matching_filter(department, sub_department, manager_id)
     db = get_db()
-    if emp_filter:
-        employee_ids = [doc["_id"] for doc in db.employees.find(emp_filter, {"_id": 1})]
+    if employee_scope_ids is not None:
         if emp_id is not None:
-            if emp_id not in employee_ids:
+            emp_match = [v for v in employee_scope_ids if _parse_int(str(v)) == emp_id or str(v) == str(emp_id)]
+            if not emp_match:
                 return {"items": [], "total": 0}
+            query = _apply_employee_scope_filter(query, emp_match, id_fields=["attributes.employeeId"])
         else:
-            if not employee_ids:
+            if not employee_scope_ids:
                 return {"items": [], "total": 0}
-            query["attributes.employeeId"] = {"$in": employee_ids}
+            query = _apply_employee_scope_filter(query, employee_scope_ids, id_fields=["attributes.employeeId"])
 
     answer_employee_ids = db.answers_export.distinct("attributes.employeeId", query)
     if not answer_employee_ids:
