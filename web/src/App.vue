@@ -42,6 +42,9 @@ const selectedDepartments = ref([]);
 const birthdaySelectedDepartments = ref([]);
 const selectedSubDepartments = ref([]);
 const managerId = ref("");
+const orgHeadcountManagerQuery = ref("");
+const orgHeadcountManagerOptions = ref([]);
+const orgHeadcountManagerLoading = ref(false);
 const grade = ref("");
 const impact = ref("");
 const timeFrom = ref("");
@@ -715,6 +718,7 @@ async function load() {
     }
 
     if (activeView.value === "org_headcount") {
+      await updateOrgHeadcountManagerOptions();
       const hcParams = new URLSearchParams();
       if (department.value.trim()) hcParams.set("department", department.value.trim());
       if (subDepartment.value.trim()) hcParams.set("sub_department", subDepartment.value.trim());
@@ -910,6 +914,39 @@ function resetBirthdayFilters() {
   birthdayMonth.value = "";
   birthdayNameSearch.value = "";
   birthdayDepartmentPick.value = "";
+}
+
+function syncOrgHeadcountManagerSelection() {
+  const q = orgHeadcountManagerQuery.value.trim();
+  if (!q) {
+    managerId.value = "";
+    return;
+  }
+  const exact = orgHeadcountManagerOptions.value.find((opt) => opt.label === q || String(opt.id) === q);
+  managerId.value = exact ? String(exact.id) : "";
+}
+
+async function updateOrgHeadcountManagerOptions() {
+  if (activeView.value !== "org_headcount") return;
+  orgHeadcountManagerLoading.value = true;
+  try {
+    const params = new URLSearchParams();
+    if (department.value.trim()) params.set("department", department.value.trim());
+    if (subDepartment.value.trim()) params.set("sub_department", subDepartment.value.trim());
+    const res = await fetch(`${API_BASE}/org_headcount/managers?${params.toString()}`);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+    const payload = await res.json();
+    orgHeadcountManagerOptions.value = payload.items || [];
+    syncOrgHeadcountManagerSelection();
+  } catch {
+    orgHeadcountManagerOptions.value = [];
+    managerId.value = "";
+  } finally {
+    orgHeadcountManagerLoading.value = false;
+  }
 }
 
 async function updateManagerOptions() {
@@ -1408,8 +1445,21 @@ onBeforeUnmount(() => {
           </div>
         </label>
         <label>
-          Manager ID (optional)
-          <input v-model="managerId" placeholder="Manager ID" />
+          Manager (typeahead, optional)
+          <div class="row-inline">
+            <input
+              v-model="orgHeadcountManagerQuery"
+              list="org-headcount-manager-options"
+              placeholder="Type manager name"
+              @change="syncOrgHeadcountManagerSelection"
+              @input="syncOrgHeadcountManagerSelection"
+            />
+            <button type="button" @click="updateOrgHeadcountManagerOptions" :disabled="orgHeadcountManagerLoading">
+              {{ orgHeadcountManagerLoading ? 'Loading…' : 'Refresh' }}
+            </button>
+            <button type="button" @click="orgHeadcountManagerQuery=''; managerId=''" :disabled="!orgHeadcountManagerQuery && !managerId">Clear</button>
+          </div>
+          <div class="subtle" v-if="managerId">Selected manager ID: {{ managerId }}</div>
         </label>
       </div>
 
@@ -1515,6 +1565,9 @@ onBeforeUnmount(() => {
       </datalist>
       <datalist id="subdepartment-options">
         <option v-for="opt in subDepartmentOptions" :key="`subdept-${opt}`" :value="opt" />
+      </datalist>
+      <datalist id="org-headcount-manager-options">
+        <option v-for="opt in orgHeadcountManagerOptions" :key="`hc-manager-${opt.id}`" :value="opt.label" />
       </datalist>
 
       <div class="action-row">

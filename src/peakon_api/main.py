@@ -868,6 +868,34 @@ def org_headcount(
     }
 
 
+@app.get("/org_headcount/managers")
+def org_headcount_managers(
+    department: Optional[str] = None,
+    sub_department: Optional[str] = None,
+) -> Dict[str, Any]:
+    db = get_db()
+    emp_filter = _employee_filter_query(department, sub_department, None)
+    query = emp_filter or {}
+    employees = list(db.employees.find(query, {"_id": 1, "attributes": 1, "relationships": 1}))
+    payload = build_org_map_payload(employees)
+
+    manager_options = sorted(
+        [
+            {
+                "id": n.get("id"),
+                "name": n.get("label"),
+                "label": f"{n.get('label') or n.get('id')} ({n.get('id')})",
+                "teamSizeInScope": n.get("subtreeSize", 1),
+                "directReports": n.get("directReports", 0),
+            }
+            for n in payload.get("nodes", [])
+            if int(n.get("directReports", 0) or 0) > 0 and n.get("id")
+        ],
+        key=lambda x: (-int(x.get("teamSizeInScope", 0) or 0), x.get("name") or ""),
+    )
+    return {"items": manager_options, "total": len(manager_options)}
+
+
 @app.get("/org_map")
 def org_map(department: Optional[str] = None, manager_id: Optional[str] = None) -> Dict[str, Any]:
     db = get_db()
