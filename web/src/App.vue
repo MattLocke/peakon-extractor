@@ -7,6 +7,7 @@ const views = [
   { id: "scores_contexts", label: "Scores Contexts" },
   { id: "scores_by_driver", label: "Scores By Driver" },
   { id: "org_map", label: "Org Map Explorer" },
+  { id: "org_headcount", label: "Org Headcount" },
   { id: "employee_birthdays", label: "Employee Birthdays" },
 ];
 
@@ -52,6 +53,7 @@ const managerCache = ref(new Map());
 const departmentOptions = ref([]);
 const subDepartmentOptions = ref([]);
 const orgMap = ref({ nodes: [], edges: [], stats: {}, rootId: null });
+const orgHeadcount = ref({ totalHeadcount: 0, managerCount: 0, rows: [], managers: [], stats: {} });
 const birthdayGroups = ref([]);
 const birthdaysTotal = ref(0);
 const birthdaysStats = ref({ employeesScanned: 0, employeesWithBirthday: 0, source: "employees" });
@@ -711,6 +713,30 @@ async function load() {
       uniqueEmployees.value = birthdaysTotal.value;
       return;
     }
+
+    if (activeView.value === "org_headcount") {
+      const hcParams = new URLSearchParams();
+      if (department.value.trim()) hcParams.set("department", department.value.trim());
+      if (subDepartment.value.trim()) hcParams.set("sub_department", subDepartment.value.trim());
+      if (managerId.value.trim()) hcParams.set("manager_id", managerId.value.trim());
+      const res = await fetch(`${API_BASE}/org_headcount?${hcParams.toString()}`);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      const payload = await res.json();
+      orgHeadcount.value = {
+        totalHeadcount: payload.totalHeadcount || 0,
+        managerCount: payload.managerCount || 0,
+        rows: payload.rows || [],
+        managers: payload.managers || [],
+        stats: payload.stats || {},
+      };
+      items.value = [];
+      total.value = orgHeadcount.value.totalHeadcount;
+      uniqueEmployees.value = orgHeadcount.value.totalHeadcount;
+      return;
+    }
     if (activeView.value === "answers_export") {
       if (search.value.trim()) params.set("search", search.value.trim());
       if (employeeId.value.trim()) params.set("employee_id", employeeId.value.trim());
@@ -763,6 +789,7 @@ async function load() {
     birthdayGroups.value = [];
     birthdaysTotal.value = 0;
     birthdaysStats.value = { employeesScanned: 0, employeesWithBirthday: 0, source: "employees" };
+    orgHeadcount.value = { totalHeadcount: 0, managerCount: 0, rows: [], managers: [], stats: {} };
     total.value = 0;
     uniqueEmployees.value = 0;
     managerOptions.value = [];
@@ -1345,6 +1372,47 @@ onBeforeUnmount(() => {
         </label>
       </div>
 
+      <div v-else-if="activeView === 'org_headcount'" class="filters-row">
+        <label>
+          Department(s)
+          <div class="row-inline">
+            <input
+              v-model="departmentInput"
+              list="department-options"
+              placeholder="Add department"
+              @keydown.enter.prevent="addChip(departmentInput, selectedDepartments)"
+            />
+            <button type="button" @click="addChip(departmentInput, selectedDepartments)" :disabled="!departmentInput.trim()">Add</button>
+          </div>
+          <div class="chip-row">
+            <button type="button" class="chip" v-for="dep in selectedDepartments" :key="`hc-dep-${dep}`" @click="removeChip(selectedDepartments, dep)">
+              {{ dep }} ✕
+            </button>
+          </div>
+        </label>
+        <label>
+          Sub-department(s)
+          <div class="row-inline">
+            <input
+              v-model="subDepartmentInput"
+              list="subdepartment-options"
+              placeholder="Add sub-department"
+              @keydown.enter.prevent="addChip(subDepartmentInput, selectedSubDepartments)"
+            />
+            <button type="button" @click="addChip(subDepartmentInput, selectedSubDepartments)" :disabled="!subDepartmentInput.trim()">Add</button>
+          </div>
+          <div class="chip-row">
+            <button type="button" class="chip" v-for="sub in selectedSubDepartments" :key="`hc-sub-${sub}`" @click="removeChip(selectedSubDepartments, sub)">
+              {{ sub }} ✕
+            </button>
+          </div>
+        </label>
+        <label>
+          Manager ID (optional)
+          <input v-model="managerId" placeholder="Manager ID" />
+        </label>
+      </div>
+
       <div v-else-if="activeView === 'employee_birthdays'" class="filters-row">
         <label>
           Department selector
@@ -1462,7 +1530,7 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section v-if="activeView !== 'org_map' && activeView !== 'employee_birthdays'" class="pager">
+    <section v-if="activeView !== 'org_map' && activeView !== 'employee_birthdays' && activeView !== 'org_headcount'" class="pager">
       <button :disabled="!hasPrev || loading" @click="prevPage">Prev</button>
       <span>{{ pageRange }}</span>
       <span v-if="activeView === 'answers_export'">
@@ -1475,6 +1543,12 @@ onBeforeUnmount(() => {
       <span>{{ nodesToRender.length }} shown / {{ orgMap.stats?.employees || 0 }} total employees</span>
       <span>Depth {{ orgMap.stats?.maxDepth ?? 0 }}</span>
       <span>Orphans {{ orgMap.stats?.orphans ?? 0 }}</span>
+    </section>
+
+    <section v-else-if="activeView === 'org_headcount'" class="pager">
+      <span>Total headcount: {{ orgHeadcount.totalHeadcount || 0 }}</span>
+      <span>Managers in scope: {{ orgHeadcount.managerCount || 0 }}</span>
+      <span>Depth {{ orgHeadcount.stats?.maxDepth ?? 0 }}</span>
     </section>
 
     <section v-else class="pager">
@@ -1631,6 +1705,78 @@ onBeforeUnmount(() => {
           </ul>
         </div>
       </aside>
+    </section>
+
+    <section v-else-if="activeView === 'org_headcount'" class="list">
+      <article class="card">
+        <div class="card-header">
+          <div>
+            <div class="id">Manager rollup</div>
+            <div class="meta">Sorted by team size in selected scope</div>
+          </div>
+        </div>
+        <div v-if="(orgHeadcount.managers || []).length" class="table-wrap">
+          <table class="mini-table">
+            <thead>
+              <tr>
+                <th>Manager</th>
+                <th>Team size</th>
+                <th>Direct reports</th>
+                <th>Department</th>
+                <th>Sub-department</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="m in orgHeadcount.managers" :key="`mgr-${m.id}`">
+                <td>{{ m.name }}</td>
+                <td>{{ m.teamSizeInScope }}</td>
+                <td>{{ m.directReports }}</td>
+                <td>{{ m.department || '—' }}</td>
+                <td>{{ m.subDepartment || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-else class="card-row"><span>No managers found for current filter scope.</span></div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">
+          <div>
+            <div class="id">Org roster (nested by manager)</div>
+            <div class="meta">Indented by reporting depth, with counts</div>
+          </div>
+        </div>
+        <div v-if="(orgHeadcount.rows || []).length" class="table-wrap">
+          <table class="mini-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>ID</th>
+                <th>Depth</th>
+                <th>Team size</th>
+                <th>Direct reports</th>
+                <th>Department</th>
+                <th>Sub-department</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in orgHeadcount.rows" :key="`row-${row.id}`">
+                <td>
+                  <span :style="{ paddingLeft: `${(row.depth || 0) * 14}px` }">{{ row.name }}</span>
+                </td>
+                <td>{{ row.id }}</td>
+                <td>{{ row.depth }}</td>
+                <td>{{ row.subtreeSize }}</td>
+                <td>{{ row.directReports }}</td>
+                <td>{{ row.department || '—' }}</td>
+                <td>{{ row.subDepartment || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-else class="card-row"><span>No employees found for current filter scope.</span></div>
+      </article>
     </section>
 
     <section v-else-if="activeView === 'employee_birthdays'" class="list">

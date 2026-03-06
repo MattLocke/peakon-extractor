@@ -795,6 +795,79 @@ def get_employee(employee_id: str) -> Dict[str, Any]:
     return {"employee": _serialize(doc)}
 
 
+@app.get("/org_headcount")
+def org_headcount(
+    department: Optional[str] = None,
+    sub_department: Optional[str] = None,
+    manager_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    db = get_db()
+    emp_filter = _employee_filter_query(department, sub_department, manager_id)
+    query = emp_filter or {}
+
+    employees = list(db.employees.find(query, {"_id": 1, "attributes": 1, "relationships": 1}))
+    payload = build_org_map_payload(employees)
+
+    node_by_id = {node["id"]: node for node in payload.get("nodes", [])}
+    children: Dict[str, List[str]] = {}
+    for edge in payload.get("edges", []):
+        children.setdefault(edge["source"], []).append(edge["target"])
+    for k in list(children.keys()):
+        children[k] = sorted(children[k], key=lambda cid: (node_by_id.get(cid, {}).get("label") or ""))
+
+    rows: List[Dict[str, Any]] = []
+
+    def walk(node_id: str, depth: int) -> None:
+        node = node_by_id.get(node_id)
+        if not node:
+            return
+        rows.append(
+            {
+                "id": node["id"],
+                "name": node.get("label"),
+                "title": node.get("title"),
+                "email": node.get("email"),
+                "department": node.get("department"),
+                "subDepartment": node.get("subDepartment"),
+                "managerId": node.get("managerId"),
+                "depth": depth,
+                "directReports": node.get("directReports", 0),
+                "subtreeSize": node.get("subtreeSize", 1),
+            }
+        )
+        for child_id in children.get(node_id, []):
+            walk(child_id, depth + 1)
+
+    roots = [n["id"] for n in payload.get("nodes", []) if not n.get("parentId")]
+    roots = sorted(roots, key=lambda rid: (node_by_id.get(rid, {}).get("label") or ""))
+    for root_id in roots:
+        walk(root_id, 0)
+
+    manager_rollup = sorted(
+        [
+            {
+                "id": n["id"],
+                "name": n.get("label"),
+                "directReports": n.get("directReports", 0),
+                "teamSizeInScope": n.get("subtreeSize", 1),
+                "department": n.get("department"),
+                "subDepartment": n.get("subDepartment"),
+            }
+            for n in payload.get("nodes", [])
+            if int(n.get("directReports", 0) or 0) > 0
+        ],
+        key=lambda x: (-int(x.get("teamSizeInScope", 0) or 0), x.get("name") or ""),
+    )
+
+    return {
+        "totalHeadcount": len(payload.get("nodes", [])),
+        "managerCount": len(manager_rollup),
+        "rows": rows,
+        "managers": manager_rollup,
+        "stats": payload.get("stats", {}),
+    }
+
+
 @app.get("/org_map")
 def org_map(department: Optional[str] = None, manager_id: Optional[str] = None) -> Dict[str, Any]:
     db = get_db()

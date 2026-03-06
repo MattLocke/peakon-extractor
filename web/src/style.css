@@ -386,3 +386,8 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+.table-wrap { overflow-x: auto; }
+.mini-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.mini-table th, .mini-table td { border-bottom: 1px solid #334155; padding: 8px; text-align: left; }
+.mini-table thead th { color: #94a3b8; font-weight: 600; }
