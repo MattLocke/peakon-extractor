@@ -9,6 +9,7 @@ const views = [
   { id: "org_map", label: "Org Map Explorer" },
   { id: "org_headcount", label: "Org Headcount" },
   { id: "employee_birthdays", label: "Employee Birthdays" },
+  { id: "employee_start_dates", label: "Employee Start Dates" },
 ];
 
 const activeView = ref("answers_export");
@@ -62,6 +63,8 @@ const birthdaysTotal = ref(0);
 const birthdaysStats = ref({ employeesScanned: 0, employeesWithBirthday: 0, source: "employees" });
 const birthdayMonth = ref("");
 const birthdayNameSearch = ref("");
+const employeeStartDates = ref([]);
+const startDateSearch = ref("");
 const orgMapSearch = ref("");
 const debouncedOrgMapSearch = ref("");
 const orgMapDepartment = ref("");
@@ -752,9 +755,35 @@ async function load() {
       birthdayGroups.value = payload.departments || [];
       birthdaysTotal.value = payload.total || 0;
       birthdaysStats.value = payload.stats || { employeesScanned: 0, employeesWithBirthday: 0, source: "employees" };
+      employeeStartDates.value = [];
       items.value = [];
       total.value = birthdaysTotal.value;
       uniqueEmployees.value = birthdaysTotal.value;
+      return;
+    }
+
+    if (activeView.value === "employee_start_dates") {
+      const startParams = new URLSearchParams({
+        limit: String(limit.value),
+        skip: String(skip.value),
+      });
+      if (department.value.trim()) startParams.set("department", department.value.trim());
+      if (subDepartment.value.trim()) startParams.set("sub_department", subDepartment.value.trim());
+      if (managerId.value.trim()) startParams.set("manager_id", managerId.value.trim());
+      if (startDateSearch.value.trim()) startParams.set("search", startDateSearch.value.trim());
+      const res = await fetch(`${API_BASE}/employees/start-dates?${startParams.toString()}`);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      const payload = await res.json();
+      employeeStartDates.value = payload.items || [];
+      birthdayGroups.value = [];
+      birthdaysTotal.value = 0;
+      birthdaysStats.value = { employeesScanned: 0, employeesWithBirthday: 0, source: "employees" };
+      items.value = [];
+      total.value = payload.total || 0;
+      uniqueEmployees.value = payload.unique_employees || payload.total || 0;
       return;
     }
 
@@ -838,6 +867,7 @@ async function load() {
     birthdayGroups.value = [];
     birthdaysTotal.value = 0;
     birthdaysStats.value = { employeesScanned: 0, employeesWithBirthday: 0, source: "employees" };
+    employeeStartDates.value = [];
     orgHeadcount.value = { totalHeadcount: 0, managerCount: 0, rows: [], managers: [], stats: {} };
     total.value = 0;
     uniqueEmployees.value = 0;
@@ -1536,6 +1566,47 @@ onBeforeUnmount(() => {
         </label>
       </div>
 
+      <div v-else-if="activeView === 'employee_start_dates'" class="filters-row">
+        <label>
+          Search people
+          <input v-model="startDateSearch" placeholder="name, title, department, id" />
+        </label>
+        <label>
+          Department(s)
+          <div class="row-inline">
+            <input
+              v-model="departmentInput"
+              list="department-options"
+              placeholder="Add department"
+              @keydown.enter.prevent="addChip(departmentInput, selectedDepartments)"
+            />
+            <button type="button" @click="addChip(departmentInput, selectedDepartments)" :disabled="!departmentInput.trim()">Add</button>
+          </div>
+          <div class="chip-row">
+            <button type="button" class="chip" v-for="dep in selectedDepartments" :key="`start-dep-${dep}`" @click="removeChip(selectedDepartments, dep)">
+              {{ dep }} ✕
+            </button>
+          </div>
+        </label>
+        <label>
+          Sub-department(s)
+          <div class="row-inline">
+            <input
+              v-model="subDepartmentInput"
+              list="subdepartment-options"
+              placeholder="Add sub-department"
+              @keydown.enter.prevent="addChip(subDepartmentInput, selectedSubDepartments)"
+            />
+            <button type="button" @click="addChip(subDepartmentInput, selectedSubDepartments)" :disabled="!subDepartmentInput.trim()">Add</button>
+          </div>
+          <div class="chip-row">
+            <button type="button" class="chip" v-for="sub in selectedSubDepartments" :key="`start-sub-${sub}`" @click="removeChip(selectedSubDepartments, sub)">
+              {{ sub }} ✕
+            </button>
+          </div>
+        </label>
+      </div>
+
       <div v-else class="filters-row">
         <label v-if="activeView === 'scores_by_driver'">
           Driver ID
@@ -1621,6 +1692,9 @@ onBeforeUnmount(() => {
       <span>{{ pageRange }}</span>
       <span v-if="activeView === 'answers_export'">
         {{ uniqueEmployees }} employees and {{ total }} answers
+      </span>
+      <span v-else-if="activeView === 'employee_start_dates'">
+        {{ uniqueEmployees }} employees with start dates
       </span>
       <button :disabled="!hasNext || loading" @click="nextPage">Next</button>
     </section>
@@ -1883,6 +1957,44 @@ onBeforeUnmount(() => {
         <div class="card-row">
           <span>No birthdays found for current filters.</span>
         </div>
+      </article>
+    </section>
+
+    <section v-else-if="activeView === 'employee_start_dates'" class="list">
+      <article class="card">
+        <div class="card-header">
+          <div>
+            <div class="id">Employee roster by start date</div>
+            <div class="meta">Newest to oldest</div>
+          </div>
+        </div>
+        <div v-if="employeeStartDates.length" class="table-wrap">
+          <table class="mini-table">
+            <thead>
+              <tr>
+                <th>Start date</th>
+                <th>Name</th>
+                <th>ID</th>
+                <th>Department</th>
+                <th>Sub-department</th>
+                <th>Title</th>
+                <th>Manager ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in employeeStartDates" :key="`start-${row.id}`">
+                <td>{{ row.startDate }}</td>
+                <td>{{ row.name }}</td>
+                <td>{{ row.id }}</td>
+                <td>{{ row.department || '—' }}</td>
+                <td>{{ row.subDepartment || '—' }}</td>
+                <td>{{ row.title || '—' }}</td>
+                <td>{{ row.managerId || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-else class="card-row"><span>No employees with start dates found for current filters.</span></div>
       </article>
     </section>
 

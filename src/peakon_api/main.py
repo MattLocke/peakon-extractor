@@ -329,6 +329,66 @@ def _employee_birthday_mmdd(employee: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _employee_start_value(employee: Dict[str, Any]) -> Optional[tuple[float, str]]:
+    attrs = employee.get("attributes") or {}
+    preferred_keys = (
+        "Start date",
+        "start_date",
+        "startDate",
+        "Hire date",
+        "hire_date",
+        "hireDate",
+        "Employment start date",
+        "employment_start_date",
+        "Employment date",
+        "employment_date",
+    )
+
+    values: List[Any] = [attrs.get(key) for key in preferred_keys]
+    for key, value in attrs.items():
+        lk = str(key).lower()
+        if "start" in lk or "hire" in lk:
+            values.append(value)
+
+    for raw in values:
+        if raw is None:
+            continue
+        if isinstance(raw, dict):
+            for key in ("value", "date", "raw", "display", "formatted"):
+                if key in raw:
+                    values.append(raw.get(key))
+            continue
+        if isinstance(raw, (int, float)):
+            try:
+                value = float(raw)
+                if value < 100_000_000:
+                    continue
+                if value > 10_000_000_000:
+                    value /= 1000.0
+                dt = datetime.fromtimestamp(value, tz=timezone.utc)
+                return (dt.timestamp(), dt.date().isoformat())
+            except Exception:
+                continue
+        s = str(raw).strip()
+        if not s:
+            continue
+        normalized = s.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(normalized)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return (dt.timestamp(), dt.date().isoformat())
+        except Exception:
+            pass
+        for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%m/%d/%y", "%d/%m/%Y"):
+            try:
+                dt = datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
+                return (dt.timestamp(), dt.date().isoformat())
+            except Exception:
+                continue
+    return None
+
+
 def _csv_values(raw: Optional[str]) -> List[str]:
     if not raw:
         return []
@@ -781,6 +841,74 @@ def list_employee_birthdays(
             "employeesWithBirthday": with_birthdays,
             "source": source,
         },
+    }
+
+
+@app.get("/employees/start-dates")
+def list_employee_start_dates(
+    limit: int = Query(200, ge=1, le=1000),
+    skip: int = Query(0, ge=0),
+    department: Optional[str] = None,
+    sub_department: Optional[str] = None,
+    manager_id: Optional[str] = None,
+    search: Optional[str] = None,
+) -> Dict[str, Any]:
+    db = get_db()
+    emp_filter = _employee_filter_query(department, sub_department, manager_id)
+    query = emp_filter or {}
+    employees = list(db.employees.find(query, {"_id": 1, "attributes": 1, "relationships": 1}))
+
+    rows: List[Dict[str, Any]] = []
+    search_lower = (search or "").strip().lower()
+
+    for employee in employees:
+        start_value = _employee_start_value(employee)
+        if not start_value:
+            continue
+        start_ts, start_iso = start_value
+        name = _employee_name(employee) or str(employee.get("_id"))
+        department_name = _employee_department(employee)
+        attrs = employee.get("attributes") or {}
+        sub_department_name = (
+            attrs.get("Sub-Department") or attrs.get("sub_department") or attrs.get("sub-department")
+        )
+        title = (
+            attrs.get("Title") or attrs.get("title") or attrs.get("Job title") or attrs.get("job_title")
+        )
+        if search_lower:
+            haystack = " | ".join(
+                [
+                    str(name or ""),
+                    str(employee.get("_id") or ""),
+                    str(department_name or ""),
+                    str(sub_department_name or ""),
+                    str(title or ""),
+                ]
+            ).lower()
+            if search_lower not in haystack:
+                continue
+        rows.append(
+            {
+                "id": str(employee.get("_id")),
+                "name": name,
+                "department": str(department_name).strip() if department_name else None,
+                "subDepartment": str(sub_department_name).strip() if sub_department_name else None,
+                "title": str(title).strip() if title else None,
+                "managerId": _employee_manager_id(employee),
+                "startDate": start_iso,
+                "startTimestamp": start_ts,
+            }
+        )
+
+    rows.sort(key=lambda row: (-row["startTimestamp"], str(row.get("name") or "").lower(), row["id"]))
+    total = len(rows)
+    sliced = rows[skip : skip + limit]
+    return {
+        "items": sliced,
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "unique_employees": total,
     }
 
 
