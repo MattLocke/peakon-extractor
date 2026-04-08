@@ -329,64 +329,94 @@ def _employee_birthday_mmdd(employee: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _employee_start_value(employee: Dict[str, Any]) -> Optional[tuple[float, str]]:
-    attrs = employee.get("attributes") or {}
-    preferred_keys = (
-        "Start date",
-        "start_date",
-        "startDate",
-        "Hire date",
-        "hire_date",
-        "hireDate",
-        "Employment start date",
-        "employment_start_date",
-        "Employment date",
-        "employment_date",
-    )
+def _coerce_date_value(raw: Any) -> Optional[tuple[float, str]]:
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        for key in ("value", "date", "raw", "display", "formatted"):
+            parsed = _coerce_date_value(raw.get(key))
+            if parsed:
+                return parsed
+        return None
+    if isinstance(raw, (int, float)):
+        try:
+            value = float(raw)
+            if value < 100_000_000:
+                return None
+            if value > 10_000_000_000:
+                value /= 1000.0
+            dt = datetime.fromtimestamp(value, tz=timezone.utc)
+            return (dt.timestamp(), dt.date().isoformat())
+        except Exception:
+            return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    normalized = s.replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (dt.timestamp(), dt.date().isoformat())
+    except Exception:
+        pass
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%m/%d/%y", "%d/%m/%Y"):
+        try:
+            dt = datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
+            return (dt.timestamp(), dt.date().isoformat())
+        except Exception:
+            continue
+    return None
 
+
+def _employee_date_value(employee: Dict[str, Any], preferred_keys: tuple[str, ...], keywords: tuple[str, ...]) -> Optional[tuple[float, str]]:
+    attrs = employee.get("attributes") or {}
     values: List[Any] = [attrs.get(key) for key in preferred_keys]
     for key, value in attrs.items():
         lk = str(key).lower()
-        if "start" in lk or "hire" in lk:
+        if any(keyword in lk for keyword in keywords):
             values.append(value)
 
     for raw in values:
-        if raw is None:
-            continue
-        if isinstance(raw, dict):
-            for key in ("value", "date", "raw", "display", "formatted"):
-                if key in raw:
-                    values.append(raw.get(key))
-            continue
-        if isinstance(raw, (int, float)):
-            try:
-                value = float(raw)
-                if value < 100_000_000:
-                    continue
-                if value > 10_000_000_000:
-                    value /= 1000.0
-                dt = datetime.fromtimestamp(value, tz=timezone.utc)
-                return (dt.timestamp(), dt.date().isoformat())
-            except Exception:
-                continue
-        s = str(raw).strip()
-        if not s:
-            continue
-        normalized = s.replace("Z", "+00:00")
-        try:
-            dt = datetime.fromisoformat(normalized)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return (dt.timestamp(), dt.date().isoformat())
-        except Exception:
-            pass
-        for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%m/%d/%y", "%d/%m/%Y"):
-            try:
-                dt = datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
-                return (dt.timestamp(), dt.date().isoformat())
-            except Exception:
-                continue
+        parsed = _coerce_date_value(raw)
+        if parsed:
+            return parsed
     return None
+
+
+def _employee_hire_value(employee: Dict[str, Any]) -> Optional[tuple[float, str]]:
+    return _employee_date_value(
+        employee,
+        (
+            "Hire date",
+            "hire_date",
+            "hireDate",
+            "Employment start date",
+            "employment_start_date",
+            "Employment date",
+            "employment_date",
+        ),
+        ("hire", "employment start", "employment date"),
+    )
+
+
+def _employee_start_value(employee: Dict[str, Any]) -> Optional[tuple[float, str]]:
+    return _employee_date_value(
+        employee,
+        (
+            "Start date",
+            "start_date",
+            "startDate",
+            "Hire date",
+            "hire_date",
+            "hireDate",
+            "Employment start date",
+            "employment_start_date",
+            "Employment date",
+            "employment_date",
+        ),
+        ("start", "hire", "employment"),
+    )
 
 
 def _csv_values(raw: Optional[str]) -> List[str]:
@@ -862,10 +892,11 @@ def list_employee_start_dates(
     search_lower = (search or "").strip().lower()
 
     for employee in employees:
+        hire_value = _employee_hire_value(employee)
         start_value = _employee_start_value(employee)
-        if not start_value:
+        if not hire_value and not start_value:
             continue
-        start_ts, start_iso = start_value
+        sort_ts, sort_iso = hire_value or start_value  # hire date wins when present
         name = _employee_name(employee) or str(employee.get("_id"))
         department_name = _employee_department(employee)
         attrs = employee.get("attributes") or {}
@@ -883,6 +914,8 @@ def list_employee_start_dates(
                     str(department_name or ""),
                     str(sub_department_name or ""),
                     str(title or ""),
+                    str((hire_value or (None, ""))[1] or ""),
+                    str((start_value or (None, ""))[1] or ""),
                 ]
             ).lower()
             if search_lower not in haystack:
@@ -895,12 +928,14 @@ def list_employee_start_dates(
                 "subDepartment": str(sub_department_name).strip() if sub_department_name else None,
                 "title": str(title).strip() if title else None,
                 "managerId": _employee_manager_id(employee),
-                "startDate": start_iso,
-                "startTimestamp": start_ts,
+                "hireDate": hire_value[1] if hire_value else None,
+                "startDate": start_value[1] if start_value else None,
+                "sortDate": sort_iso,
+                "sortTimestamp": sort_ts,
             }
         )
 
-    rows.sort(key=lambda row: (-row["startTimestamp"], str(row.get("name") or "").lower(), row["id"]))
+    rows.sort(key=lambda row: (-row["sortTimestamp"], str(row.get("name") or "").lower(), row["id"]))
     total = len(rows)
     sliced = rows[skip : skip + limit]
     return {

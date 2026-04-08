@@ -1694,7 +1694,7 @@ onBeforeUnmount(() => {
         {{ uniqueEmployees }} employees and {{ total }} answers
       </span>
       <span v-else-if="activeView === 'employee_start_dates'">
-        {{ uniqueEmployees }} employees with start dates
+        {{ uniqueEmployees }} employees with hire/start dates
       </span>
       <button :disabled="!hasNext || loading" @click="nextPage">Next</button>
     </section>
@@ -1964,14 +1964,15 @@ onBeforeUnmount(() => {
       <article class="card">
         <div class="card-header">
           <div>
-            <div class="id">Employee roster by start date</div>
-            <div class="meta">Newest to oldest</div>
+            <div class="id">Employee roster by hire date</div>
+            <div class="meta">Sorted by hire date first, then start date</div>
           </div>
         </div>
         <div v-if="employeeStartDates.length" class="table-wrap">
           <table class="mini-table">
             <thead>
               <tr>
+                <th>Hire date</th>
                 <th>Start date</th>
                 <th>Name</th>
                 <th>ID</th>
@@ -1983,7 +1984,8 @@ onBeforeUnmount(() => {
             </thead>
             <tbody>
               <tr v-for="row in employeeStartDates" :key="`start-${row.id}`">
-                <td>{{ row.startDate }}</td>
+                <td>{{ row.hireDate || '—' }}</td>
+                <td>{{ row.startDate || '—' }}</td>
                 <td>{{ row.name }}</td>
                 <td>{{ row.id }}</td>
                 <td>{{ row.department || '—' }}</td>
@@ -1994,7 +1996,7 @@ onBeforeUnmount(() => {
             </tbody>
           </table>
         </div>
-        <div v-else class="card-row"><span>No employees with start dates found for current filters.</span></div>
+        <div v-else class="card-row"><span>No employees with hire/start dates found for current filters.</span></div>
       </article>
     </section>
 
