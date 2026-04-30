@@ -718,6 +718,46 @@ async function exportFilteredAnswersCsv() {
   }
 }
 
+async function exportManagerQuestionCsv() {
+  if (activeView.value !== "answers_export" || exportingCsv.value) return;
+  if (!answeredFrom.value.trim() || !answeredTo.value.trim()) {
+    error.value = "Set Answered from and Answered to before generating the manager question CSV.";
+    return;
+  }
+  exportingCsv.value = true;
+  error.value = "";
+  try {
+    const params = new URLSearchParams();
+    params.set("start_date", answeredFrom.value.trim());
+    params.set("end_date", answeredTo.value.trim());
+    if (department.value.trim()) params.set("department", department.value.trim());
+    if (subDepartment.value.trim()) params.set("sub_department", subDepartment.value.trim());
+    if (managerId.value.trim()) params.set("manager_id", managerId.value.trim());
+
+    const res = await fetch(`${API_BASE}/answers_export/manager_question_csv?${params.toString()}`);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="?([^";]+)"?/i);
+    const filename = match?.[1] || `manager-question-export-${answeredFrom.value}-to-${answeredTo.value}.csv`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    exportingCsv.value = false;
+  }
+}
+
 async function load() {
   loading.value = true;
   error.value = "";
@@ -1701,6 +1741,9 @@ onBeforeUnmount(() => {
         <button class="primary" @click="resetAndLoad">{{ activeView === 'employee_birthdays' ? 'Refresh data' : 'Apply' }}</button>
         <button v-if="activeView === 'answers_export'" @click="exportFilteredAnswersCsv" :disabled="exportingCsv || loading">
           {{ exportingCsv ? 'Exporting CSV…' : 'Export filtered CSV' }}
+        </button>
+        <button v-if="activeView === 'answers_export'" @click="exportManagerQuestionCsv" :disabled="exportingCsv || loading">
+          Manager question CSV
         </button>
         <button v-if="activeView === 'employee_birthdays'" @click="resetBirthdayFilters">Reset filters</button>
         <button v-if="activeView === 'org_map'" @click="focusOnSelectedManager" :disabled="!selectedOrgNodeId">Focus selected subtree</button>

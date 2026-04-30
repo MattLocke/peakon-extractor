@@ -44,6 +44,7 @@ The UI talks to a small API layer at `http://localhost:8000` (configurable via `
 
 Filters are available in the UI for:
 - Answers export: search text, employee ID, question ID, score range, answered date range, department/sub-department/manager
+- Manager question CSV: from Answers Export, set Answered from/to and use "Manager question CSV" to download one row per manager/question with 5+ respondents, English question text, hierarchy lookup columns, respondent count, and average score
 - Scores contexts: grade, impact, time range, department/sub-department (employee-scoped)
 - Scores by driver: driver ID, grade, time range, department/sub-department (employee-scoped)
 - Org Map Explorer: employee graph from manager relationships with search + zoom + detail panel

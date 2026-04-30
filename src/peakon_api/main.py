@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import csv
 from datetime import datetime, timezone
+import io
 import re
+from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pymongo import DESCENDING
 
 from .db import get_db
@@ -103,6 +107,119 @@ def _validate_iso(value: Optional[str]) -> Optional[str]:
         return value
     except Exception:
         return None
+
+
+def _nested_value(data: Dict[str, Any], *paths: str) -> Any:
+    for path in paths:
+        current: Any = data
+        found = True
+        for part in path.split("."):
+            if isinstance(current, dict) and part in current:
+                current = current.get(part)
+            else:
+                found = False
+                break
+        if found and current not in (None, ""):
+            return current
+    return None
+
+
+def _english_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("en", "en-US", "en_us", "english", "English", "text", "value"):
+            if key in value:
+                text = _english_text(value.get(key))
+                if text:
+                    return text
+        for nested in value.values():
+            text = _english_text(nested)
+            if text:
+                return text
+    return str(value)
+
+
+def _as_lookup_ids(value: Any) -> List[Any]:
+    if value is None or value == "":
+        return []
+    out = [value, str(value)]
+    parsed = _parse_int(str(value))
+    if parsed is not None:
+        out.append(parsed)
+    unique: List[Any] = []
+    for item in out:
+        if item not in unique:
+            unique.append(item)
+    return unique
+
+
+def _answer_driver_id(answer: Dict[str, Any]) -> Any:
+    attrs = answer.get("attributes") or {}
+    rels = answer.get("relationships") or {}
+    return _nested_value(
+        attrs,
+        "driverId",
+        "driverID",
+        "engagementDriverId",
+        "engagement_driver_id",
+        "driver.id",
+    ) or _nested_value(
+        rels,
+        "driver.data.id",
+        "Driver.data.id",
+        "engagementDriver.data.id",
+        "question.data.relationships.driver.data.id",
+    )
+
+
+def _driver_lookup(db: Any, driver_ids: set[Any], question_ids: set[Any]) -> Dict[str, Dict[str, Any]]:
+    lookup: Dict[str, Dict[str, Any]] = {}
+    ids: List[Any] = []
+    for value in list(driver_ids) + list(question_ids):
+        ids.extend(_as_lookup_ids(value))
+    if not ids:
+        return lookup
+    try:
+        for doc in db.drivers_catalog.find({"_id": {"$in": ids}}):
+            lookup[str(doc.get("_id"))] = doc
+    except Exception:
+        return lookup
+    return lookup
+
+
+def _answer_hierarchy(answer: Dict[str, Any], catalog: Dict[str, Dict[str, Any]]) -> tuple[str, str, str]:
+    attrs = answer.get("attributes") or {}
+    question_id = attrs.get("questionId")
+    driver_id = _answer_driver_id(answer)
+    catalog_doc = catalog.get(str(driver_id)) or catalog.get(str(question_id)) or {}
+
+    category = (
+        catalog_doc.get("category")
+        or _nested_value(attrs, "category", "questionCategory", "group", "engagementGroup")
+        or "Engagement"
+    )
+    driver = catalog_doc.get("driver") or _nested_value(attrs, "driver", "driverName", "questionDriver") or ""
+    subdriver = (
+        catalog_doc.get("subdriver")
+        or catalog_doc.get("subDriver")
+        or _nested_value(attrs, "subDriver", "subdriver", "subDriverName", "questionSubDriver")
+        or ""
+    )
+    return str(category or ""), str(driver or ""), str(subdriver or "")
+
+
+def _csv_response(filename: str, rows: List[List[Any]]) -> Response:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerows(rows)
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def _answers_export_query(
@@ -748,6 +865,119 @@ def list_answers_export_managers(
             },
         )
     return {"items": manager_items, "total": len(manager_items)}
+
+
+@app.get("/answers_export/manager_question_csv")
+def export_manager_question_csv(
+    start_date: str = Query(..., description="Inclusive responseAnsweredAt/report start date"),
+    end_date: str = Query(..., description="Inclusive responseAnsweredAt/report end date"),
+    department: Optional[str] = None,
+    sub_department: Optional[str] = None,
+    manager_id: Optional[str] = None,
+    min_respondents: int = Query(5, ge=1),
+) -> Response:
+    start = _validate_iso(start_date)
+    end = _validate_iso(end_date)
+    if not start or not end:
+        return _csv_response(
+            "manager-question-export-error.csv",
+            [["error"], ["start_date and end_date must be ISO-like dates, for example 2026-01-01"]],
+        )
+
+    db = get_db()
+    query: Dict[str, Any] = {}
+    # Date-only end dates should include the whole selected day for ISO timestamp strings.
+    end_bound = f"{end}T23:59:59.999999Z" if re.fullmatch(r"\d{4}-\d{2}-\d{2}", end) else end
+    query.update(_iso_range("attributes.responseAnsweredAt", start, end_bound))
+
+    employee_scope_ids = _employee_ids_matching_filter(department, sub_department, manager_id)
+    if employee_scope_ids is not None:
+        if not employee_scope_ids:
+            employee_scope_ids = []
+        query = _apply_employee_scope_filter(query, employee_scope_ids, id_fields=["attributes.employeeId"])
+
+    answers = list(db.answers_export.find(query, {"attributes": 1, "relationships": 1}))
+    employee_ids = {answer.get("attributes", {}).get("employeeId") for answer in answers}
+    employee_lookup_ids: set[Any] = set()
+    for employee_id_value in employee_ids:
+        employee_lookup_ids.update(_as_lookup_ids(employee_id_value))
+
+    employees = list(
+        db.employees.find(
+            {"_id": {"$in": list(employee_lookup_ids)}},
+            {"_id": 1, "attributes": 1, "relationships": 1},
+        )
+    )
+    employees_by_id = {str(employee.get("_id")): employee for employee in employees}
+
+    driver_ids = {_answer_driver_id(answer) for answer in answers if _answer_driver_id(answer) not in (None, "")}
+    question_ids = {answer.get("attributes", {}).get("questionId") for answer in answers if answer.get("attributes", {}).get("questionId") not in (None, "")}
+    catalog = _driver_lookup(db, driver_ids, question_ids)
+
+    grouped: Dict[tuple[str, Any, str, str, str, str], Dict[str, Any]] = defaultdict(
+        lambda: {"scores": [], "respondents": set()}
+    )
+
+    for answer in answers:
+        attrs = answer.get("attributes") or {}
+        employee_id_value = attrs.get("employeeId")
+        employee = employees_by_id.get(str(employee_id_value))
+        if not employee:
+            continue
+        mgr_id = _employee_manager_id(employee)
+        if not mgr_id:
+            continue
+        if manager_id and str(mgr_id) != str(manager_id):
+            continue
+
+        score = attrs.get("answerScore")
+        try:
+            numeric_score = float(score)
+        except Exception:
+            continue
+
+        question_id_value = attrs.get("questionId") or attrs.get("answerId") or answer.get("_id")
+        question_text = _english_text(attrs.get("questionText") or attrs.get("question") or "")
+        category, driver, subdriver = _answer_hierarchy(answer, catalog)
+        key = (str(mgr_id), question_id_value, category, driver, subdriver, question_text)
+        grouped[key]["scores"].append(numeric_score)
+        grouped[key]["respondents"].add(str(employee_id_value))
+
+    headers = [
+        "managerId",
+        "startDate",
+        "endDate",
+        "category",
+        "driver",
+        "subDriver",
+        "questionId",
+        "questionText",
+        "respondentCount",
+        "score",
+    ]
+    rows: List[List[Any]] = [headers]
+    for (mgr_id, question_id_value, category, driver, subdriver, question_text), data in sorted(grouped.items()):
+        respondent_count = len(data["respondents"])
+        if respondent_count < min_respondents:
+            continue
+        scores = data["scores"]
+        avg_score = round(sum(scores) / len(scores), 2) if scores else ""
+        rows.append([
+            mgr_id,
+            start_date,
+            end_date,
+            category,
+            driver,
+            subdriver,
+            question_id_value,
+            question_text,
+            respondent_count,
+            avg_score,
+        ])
+
+    safe_start = re.sub(r"[^0-9A-Za-z_-]+", "-", start_date).strip("-")
+    safe_end = re.sub(r"[^0-9A-Za-z_-]+", "-", end_date).strip("-")
+    return _csv_response(f"manager-question-export-{safe_start}-to-{safe_end}.csv", rows)
 
 
 @app.get("/scores_contexts")
