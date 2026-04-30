@@ -26,6 +26,22 @@ def as_id_set(value: Any) -> set[Any]:
 
 
 
+
+def truncate_jsonish(value: Any, *, max_chars: int = 1200) -> Any:
+    text = json.dumps(value, default=str, ensure_ascii=False)
+    if len(text) <= max_chars:
+        return value
+    return text[:max_chars] + "…"
+
+
+def raw_subdriver_payload(doc: dict[str, Any]) -> Any:
+    attrs = doc.get("attributes") or {}
+    for path in ("subdriver", "scores.subdrivers", "changes.previous.subdrivers", "changes.first.subdrivers"):
+        value = _nested_value(attrs, path)
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
 def find_key_paths(value: Any, needle: str, prefix: str = "") -> list[str]:
     paths: list[str] = []
     if isinstance(value, dict):
@@ -63,11 +79,18 @@ def main() -> None:
     raw_driver_ids = [str(doc.get("_id") or doc.get("id")) for doc in raw_driver_docs]
     raw_driver_subdriver_paths: Counter[str] = Counter()
     raw_driver_question_paths: Counter[str] = Counter()
+    raw_subdriver_examples = []
     for doc in raw_driver_docs:
         for path in find_key_paths(doc, "subdriver"):
             raw_driver_subdriver_paths[path] += 1
         for path in find_key_paths(doc, "question"):
             raw_driver_question_paths[path] += 1
+        payload = raw_subdriver_payload(doc)
+        if payload not in (None, "", [], {}) and len(raw_subdriver_examples) < args.sample:
+            raw_subdriver_examples.append({
+                "driverId": str(doc.get("_id") or doc.get("id") or ""),
+                "subdriverPayloadExample": truncate_jsonish(payload),
+            })
 
     answers_seen = 0
     driver_ids: Counter[str] = Counter()
@@ -128,6 +151,7 @@ def main() -> None:
             "sampleIds": raw_driver_ids[: args.sample],
             "subdriverKeyPaths": raw_driver_subdriver_paths.most_common(args.sample),
             "questionKeyPaths": raw_driver_question_paths.most_common(args.sample),
+            "subdriverPayloadExamples": raw_subdriver_examples,
         },
         "answersExport": {
             "answersSeen": answers_seen,
