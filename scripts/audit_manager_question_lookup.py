@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import re
 from collections import Counter
 from typing import Any
@@ -80,6 +81,16 @@ def find_key_paths(value: Any, needle: str, prefix: str = "") -> list[str]:
         for i, child in enumerate(value[:5]):
             paths.extend(find_key_paths(child, needle, f"{prefix}[{i}]"))
     return paths
+
+
+def normalize_output_path(path: str) -> str:
+    # Git Bash/MSYS on Windows rewrites `/tmp/foo.csv` Docker exec args to
+    # `C:/Users/.../Temp/foo.csv`, which is not the Linux container path the
+    # follow-up `docker compose cp api:/tmp/foo.csv ...` expects. Normalize that
+    # common case back to /tmp/<basename>.
+    if re.match(r"^[A-Za-z]:[\\/]", path):
+        return f"/tmp/{os.path.basename(path)}"
+    return path
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Audit Peakon sub-driver lookup coverage for manager question CSV exports.")
@@ -215,6 +226,10 @@ def main() -> None:
     }
 
     if args.missing_csv:
+        args.missing_csv = normalize_output_path(args.missing_csv)
+        parent = os.path.dirname(args.missing_csv)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(args.missing_csv, "w", newline="", encoding="utf-8") as fh:
             writer = csv.writer(fh)
             writer.writerow(["questionId", "answerCount", "questionText", "category", "driver", "subDriver"])
