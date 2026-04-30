@@ -123,3 +123,12 @@ python scripts/probe_peakon_question_metadata.py --driver-id engagement --all
 ```
 
 Run this inside the API container so it uses the same Peakon auth/config as the app. A useful endpoint should return records with question IDs/text plus driver/subdriver metadata.
+
+If no accessible metadata endpoint exists, fill the worksheet's category/driver/subDriver columns and import it into `drivers_catalog`:
+
+```bash
+docker compose cp ./missing-question-lookup.csv api:/tmp/missing-question-lookup.csv
+docker compose exec api python scripts/import_question_lookup.py /tmp/missing-question-lookup.csv
+```
+
+Blank lookup rows are skipped by default, so the CSV can be completed/imported iteratively.
