@@ -25,6 +25,20 @@ def as_id_set(value: Any) -> set[Any]:
     return set(_as_lookup_ids(value))
 
 
+
+def find_key_paths(value: Any, needle: str, prefix: str = "") -> list[str]:
+    paths: list[str] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            if needle.lower() in str(key).lower():
+                paths.append(path)
+            paths.extend(find_key_paths(child, needle, path))
+    elif isinstance(value, list):
+        for i, child in enumerate(value[:5]):
+            paths.extend(find_key_paths(child, needle, f"{prefix}[{i}]"))
+    return paths
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Audit Peakon sub-driver lookup coverage for manager question CSV exports.")
     parser.add_argument("--start", required=True, help="Inclusive responseAnsweredAt start date/timestamp")
@@ -44,6 +58,16 @@ def main() -> None:
     catalog_docs = list(db.drivers_catalog.find({}, {"_id": 1, "category": 1, "driver": 1, "subdriver": 1, "subDriver": 1}))
     catalog_by_id = {str(doc.get("_id")): doc for doc in catalog_docs}
     catalog_subdriver_docs = [doc for doc in catalog_docs if doc.get("subdriver") or doc.get("subDriver")]
+
+    raw_driver_docs = list(db.drivers.find({}, {"_id": 1, "id": 1, "attributes": 1, "relationships": 1}).limit(200))
+    raw_driver_ids = [str(doc.get("_id") or doc.get("id")) for doc in raw_driver_docs]
+    raw_driver_subdriver_paths: Counter[str] = Counter()
+    raw_driver_question_paths: Counter[str] = Counter()
+    for doc in raw_driver_docs:
+        for path in find_key_paths(doc, "subdriver"):
+            raw_driver_subdriver_paths[path] += 1
+        for path in find_key_paths(doc, "question"):
+            raw_driver_question_paths[path] += 1
 
     answers_seen = 0
     driver_ids: Counter[str] = Counter()
@@ -98,6 +122,12 @@ def main() -> None:
             "totalDocs": len(catalog_docs),
             "docsWithSubdriver": len(catalog_subdriver_docs),
             "subdriverExamples": catalog_subdriver_docs[: args.sample],
+        },
+        "rawDriversCollection": {
+            "sampledDocs": len(raw_driver_docs),
+            "sampleIds": raw_driver_ids[: args.sample],
+            "subdriverKeyPaths": raw_driver_subdriver_paths.most_common(args.sample),
+            "questionKeyPaths": raw_driver_question_paths.most_common(args.sample),
         },
         "answersExport": {
             "answersSeen": answers_seen,

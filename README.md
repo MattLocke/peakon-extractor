@@ -114,4 +114,4 @@ To generate a fill-in worksheet for missing lookup rows:
 PYTHONPATH=src python scripts/audit_manager_question_lookup.py --start 2026-01-01 --end 2026-03-31 --missing-csv missing-question-lookup.csv
 ```
 
-The report shows how many `drivers_catalog` rows have sub-drivers, how many answers expose driver/question lookup keys, and how many answers actually match a catalog row with a sub-driver. The optional CSV includes missing `questionId`, answer count, and representative English question text with blank category/driver/subDriver columns for lookup completion.
+The report shows how many `drivers_catalog` rows have sub-drivers, whether the raw `drivers` collection appears to contain sub-driver/question-shaped fields, how many answers expose driver/question lookup keys, and how many answers actually match a catalog row with a sub-driver. The optional CSV includes missing `questionId`, answer count, and representative English question text with blank category/driver/subDriver columns for lookup completion.
