@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -38,13 +40,22 @@ def parse_id(value: str) -> Any:
         return value
 
 
+
+def normalize_input_path(path: str) -> str:
+    # Git Bash/MSYS can rewrite `/tmp/foo.csv` Docker exec args to
+    # `C:/Users/.../Temp/foo.csv`. Inside the Linux container, the file was
+    # copied to `/tmp/foo.csv`, so normalize the common drive-letter case.
+    if re.match(r"^[A-Za-z]:[\\/]", path):
+        return f"/tmp/{os.path.basename(path)}"
+    return path
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Import filled Peakon question lookup CSV into Mongo drivers_catalog.")
     parser.add_argument("csv_path", help="Path to filled CSV inside the container/local environment")
     parser.add_argument("--allow-partial", action="store_true", help="Import rows even if category/driver/subDriver are not all filled")
     args = parser.parse_args()
 
-    path = Path(args.csv_path)
+    path = Path(normalize_input_path(args.csv_path))
     db = get_db()
 
     seen = 0
