@@ -47,6 +47,7 @@ input {
   border-radius: 8px;
   padding: 8px 12px;
   color: #e2e8f0;
+  width: 100%;
 }
 
 .tabs {
@@ -98,6 +99,7 @@ input {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
 }
 
 .filters label.toggle-inline {
@@ -116,6 +118,16 @@ input {
   display: flex;
   gap: 8px;
   align-items: center;
+  min-width: 0;
+}
+
+.row-inline input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.row-inline button {
+  flex: 0 0 auto;
 }
 
 .chip {

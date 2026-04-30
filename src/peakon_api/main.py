@@ -22,6 +22,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+ANSWERS_ORPHANED_MANAGER_ID = "__orphaned__"
+MANAGER_VISIBILITY_THRESHOLD = 5
+
 
 def _serialize(value: Any) -> Any:
     if isinstance(value, ObjectId):
@@ -67,6 +70,29 @@ def _parse_int(value: Optional[str]) -> Optional[int]:
         return int(value)
     except Exception:
         return None
+
+
+def _id_lookup_values(raw_ids: List[Any]) -> List[Any]:
+    out: List[Any] = []
+    seen: set[str] = set()
+
+    def add(value: Any) -> None:
+        if value is None:
+            return
+        key = f"{type(value).__name__}:{value}"
+        if key not in seen:
+            seen.add(key)
+            out.append(value)
+
+    for raw_id in raw_ids:
+        add(raw_id)
+        raw_str = str(raw_id)
+        add(raw_str)
+        parsed = _parse_int(raw_str)
+        if parsed is not None:
+            add(parsed)
+
+    return out
 
 
 def _validate_iso(value: Optional[str]) -> Optional[str]:
@@ -164,6 +190,10 @@ def _employee_manager_id(employee: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _is_orphaned_manager_filter(manager_id: Optional[str]) -> bool:
+    return str(manager_id or "").strip().lower() in {ANSWERS_ORPHANED_MANAGER_ID, "orphaned"}
+
+
 def _employee_name(employee: Dict[str, Any]) -> Optional[str]:
     attrs = employee.get("attributes") or {}
     first = attrs.get("First name") or attrs.get("first_name") or attrs.get("firstName")
@@ -193,6 +223,24 @@ def _employee_department(employee: Dict[str, Any]) -> Optional[str]:
         if value is not None and str(value).strip() != "":
             return str(value).strip()
     return None
+
+
+def _employee_manager_groups(employees: List[Dict[str, Any]]) -> Dict[str, List[Any]]:
+    groups: Dict[str, List[Any]] = {}
+    for employee in employees:
+        manager_value = _employee_manager_id(employee)
+        if not manager_value:
+            continue
+        groups.setdefault(str(manager_value), []).append(employee.get("_id"))
+    return groups
+
+
+def _orphaned_employee_ids(employees: List[Dict[str, Any]]) -> List[Any]:
+    raw_ids: List[Any] = []
+    for employee_ids in _employee_manager_groups(employees).values():
+        if 0 < len(employee_ids) < MANAGER_VISIBILITY_THRESHOLD:
+            raw_ids.extend(employee_ids)
+    return _id_lookup_values(raw_ids)
 
 
 def _parse_month_name(month_raw: str) -> Optional[int]:
@@ -483,20 +531,7 @@ def _employee_ids_matching_filter(
     if not raw_ids:
         return []
 
-    out: List[Any] = []
-    seen: set[str] = set()
-    for rid in raw_ids:
-        if rid is None:
-            continue
-        s = str(rid)
-        if s in seen:
-            continue
-        seen.add(s)
-        out.append(rid)
-        parsed = _parse_int(s)
-        if parsed is not None and parsed != rid:
-            out.append(parsed)
-    return out
+    return _id_lookup_values(raw_ids)
 
 
 def _apply_employee_scope_filter(
@@ -514,6 +549,42 @@ def _apply_employee_scope_filter(
     if not base_query:
         return id_match
     return {"$and": [base_query, id_match]}
+
+
+def _answer_employees_for_query(query: Dict[str, Any]) -> List[Dict[str, Any]]:
+    db = get_db()
+    answer_employee_ids = db.answers_export.distinct("attributes.employeeId", query)
+    if not answer_employee_ids:
+        return []
+    return list(
+        db.employees.find(
+            {"_id": {"$in": _id_lookup_values(answer_employee_ids)}},
+            {"_id": 1, "attributes": 1, "relationships": 1},
+        )
+    )
+
+
+def _apply_answers_employee_filters(
+    query: Dict[str, Any],
+    *,
+    department: Optional[str],
+    sub_department: Optional[str],
+    manager_id: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    manager_scope = None if _is_orphaned_manager_filter(manager_id) else manager_id
+    employee_scope_ids = _employee_ids_matching_filter(department, sub_department, manager_scope)
+    if employee_scope_ids is not None:
+        if not employee_scope_ids:
+            return None
+        query = _apply_employee_scope_filter(query, employee_scope_ids, id_fields=["attributes.employeeId"])
+
+    if not _is_orphaned_manager_filter(manager_id):
+        return query
+
+    orphaned_ids = _orphaned_employee_ids(_answer_employees_for_query(query))
+    if not orphaned_ids:
+        return None
+    return _apply_employee_scope_filter(query, orphaned_ids, id_fields=["attributes.employeeId"])
 
 
 @app.get("/health")
@@ -548,17 +619,23 @@ def list_answers_export(
         has_comment=has_comment,
     )
     emp_id = _parse_int(employee_id)
-    employee_scope_ids = _employee_ids_matching_filter(department, sub_department, manager_id)
-    if employee_scope_ids is not None:
-        if emp_id is not None:
+    if emp_id is not None and not _is_orphaned_manager_filter(manager_id):
+        employee_scope_ids = _employee_ids_matching_filter(department, sub_department, manager_id)
+        if employee_scope_ids is not None:
             emp_match = [v for v in employee_scope_ids if _parse_int(str(v)) == emp_id or str(v) == str(emp_id)]
             if not emp_match:
                 return {"items": [], "total": 0, "skip": skip, "limit": limit, "unique_employees": 0}
             query = _apply_employee_scope_filter(query, emp_match, id_fields=["attributes.employeeId"])
-        else:
-            if not employee_scope_ids:
-                return {"items": [], "total": 0, "skip": skip, "limit": limit, "unique_employees": 0}
-            query = _apply_employee_scope_filter(query, employee_scope_ids, id_fields=["attributes.employeeId"])
+    else:
+        scoped_query = _apply_answers_employee_filters(
+            query,
+            department=department,
+            sub_department=sub_department,
+            manager_id=manager_id,
+        )
+        if scoped_query is None:
+            return {"items": [], "total": 0, "skip": skip, "limit": limit, "unique_employees": 0}
+        query = scoped_query
     result = _list_collection("answers_export", limit=limit, skip=skip, filter_query=query)
     db = get_db()
     result["unique_employees"] = len(db.answers_export.distinct("attributes.employeeId", query))
@@ -590,18 +667,24 @@ def list_answers_export_managers(
         has_comment=has_comment,
     )
     emp_id = _parse_int(employee_id)
-    employee_scope_ids = _employee_ids_matching_filter(department, sub_department, manager_id)
     db = get_db()
-    if employee_scope_ids is not None:
-        if emp_id is not None:
+    if emp_id is not None and not _is_orphaned_manager_filter(manager_id):
+        employee_scope_ids = _employee_ids_matching_filter(department, sub_department, manager_id)
+        if employee_scope_ids is not None:
             emp_match = [v for v in employee_scope_ids if _parse_int(str(v)) == emp_id or str(v) == str(emp_id)]
             if not emp_match:
                 return {"items": [], "total": 0}
             query = _apply_employee_scope_filter(query, emp_match, id_fields=["attributes.employeeId"])
-        else:
-            if not employee_scope_ids:
-                return {"items": [], "total": 0}
-            query = _apply_employee_scope_filter(query, employee_scope_ids, id_fields=["attributes.employeeId"])
+    else:
+        scoped_query = _apply_answers_employee_filters(
+            query,
+            department=department,
+            sub_department=sub_department,
+            manager_id=manager_id,
+        )
+        if scoped_query is None:
+            return {"items": [], "total": 0}
+        query = scoped_query
 
     answer_employee_ids = db.answers_export.distinct("attributes.employeeId", query)
     if not answer_employee_ids:
@@ -609,21 +692,13 @@ def list_answers_export_managers(
 
     employees = list(
         db.employees.find(
-            {"_id": {"$in": answer_employee_ids}},
+            {"_id": {"$in": _id_lookup_values(answer_employee_ids)}},
             {"_id": 1, "attributes": 1, "relationships": 1},
         )
     )
-    manager_ids: set[str] = set()
-    manager_counts: Dict[str, int] = {}
-    for employee in employees:
-        manager_value = _employee_manager_id(employee)
-        if manager_value:
-            manager_str = str(manager_value)
-            manager_ids.add(manager_str)
-            manager_counts[manager_str] = manager_counts.get(manager_str, 0) + 1
-
-    if not manager_ids:
-        return {"items": [], "total": 0}
+    manager_groups = _employee_manager_groups(employees)
+    manager_ids = set(manager_groups.keys())
+    manager_counts = {manager_id_value: len(employee_ids) for manager_id_value, employee_ids in manager_groups.items()}
 
     manager_lookup_ids: set[Any] = set()
     for manager_id_value in manager_ids:
@@ -658,6 +733,20 @@ def list_answers_export_managers(
         )
 
     manager_items.sort(key=lambda item: item["label"])
+    orphaned_count = sum(count for count in manager_counts.values() if 0 < count < MANAGER_VISIBILITY_THRESHOLD)
+    if orphaned_count:
+        manager_items.insert(
+            0,
+            {
+                "id": ANSWERS_ORPHANED_MANAGER_ID,
+                "label": f"Orphaned comments (<{MANAGER_VISIBILITY_THRESHOLD} employees / manager)",
+                "name": "Orphaned comments",
+                "department": None,
+                "count": orphaned_count,
+                "kind": "orphaned",
+                "threshold": MANAGER_VISIBILITY_THRESHOLD,
+            },
+        )
     return {"items": manager_items, "total": len(manager_items)}
 
 

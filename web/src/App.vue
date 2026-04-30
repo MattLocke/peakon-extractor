@@ -12,6 +12,8 @@ const views = [
   { id: "employee_start_dates", label: "Employee Start Dates" },
 ];
 
+const ORPHANED_MANAGER_ID = "__orphaned__";
+
 const activeView = ref("answers_export");
 const limit = ref(50);
 const skip = ref(0);
@@ -105,6 +107,10 @@ const pageRange = computed(() => {
   const end = Math.min(skip.value + limit.value, total.value);
   return `${start}-${end} of ${total.value}`;
 });
+
+const visibleManagerOptions = computed(() =>
+  managerOptions.value.filter((manager) => manager.id !== ORPHANED_MANAGER_ID)
+);
 
 const selectedOrgNode = computed(() => {
   if (!selectedOrgNodeId.value) return null;
@@ -596,6 +602,16 @@ function orgParentChain(nodeId) {
   return chain;
 }
 
+function dateStartIso(value) {
+  const date = String(value || "").trim();
+  return date ? `${date}T00:00:00.000Z` : "";
+}
+
+function dateEndIso(value) {
+  const date = String(value || "").trim();
+  return date ? `${date}T23:59:59.999Z` : "";
+}
+
 function buildAnswersParams({ includePaging = true, skipOverride, limitOverride, includeManager = true } = {}) {
   const params = new URLSearchParams();
   if (includePaging) {
@@ -607,8 +623,8 @@ function buildAnswersParams({ includePaging = true, skipOverride, limitOverride,
   if (questionId.value.trim()) params.set("question_id", questionId.value.trim());
   if (minScore.value.trim()) params.set("min_score", minScore.value.trim());
   if (maxScore.value.trim()) params.set("max_score", maxScore.value.trim());
-  if (answeredFrom.value.trim()) params.set("answered_from", answeredFrom.value.trim());
-  if (answeredTo.value.trim()) params.set("answered_to", answeredTo.value.trim());
+  if (answeredFrom.value.trim()) params.set("answered_from", dateStartIso(answeredFrom.value));
+  if (answeredTo.value.trim()) params.set("answered_to", dateEndIso(answeredTo.value));
   if (hasComment.value) params.set("has_comment", hasComment.value);
   if (department.value.trim()) params.set("department", department.value.trim());
   if (subDepartment.value.trim()) params.set("sub_department", subDepartment.value.trim());
@@ -625,7 +641,6 @@ function csvCell(value) {
 function answersToCsv(rows) {
   const headers = [
     "answerId",
-    "employeeId",
     "answerScore",
     "questionId",
     "questionText",
@@ -633,9 +648,7 @@ function answersToCsv(rows) {
     "responseAnsweredAt",
     "department",
     "subDepartment",
-    "managerId",
     "country",
-    "compGrade",
   ];
 
   const lines = [headers.join(",")];
@@ -644,7 +657,6 @@ function answersToCsv(rows) {
     const record = employeeRecord(employeeIdValue);
     const line = [
       item?.attributes?.answerId || item?._id || "",
-      employeeIdValue,
       item?.attributes?.answerScore ?? "",
       item?.attributes?.questionId ?? "",
       item?.attributes?.questionText || "",
@@ -652,9 +664,7 @@ function answersToCsv(rows) {
       item?.attributes?.responseAnsweredAt || "",
       record?.attributes?.Department || record?.attributes?.department || "",
       record?.attributes?.["Sub-Department"] || record?.attributes?.sub_department || record?.attributes?.["sub-department"] || "",
-      employeeManagerId(employeeIdValue) === "—" ? "" : employeeManagerId(employeeIdValue),
       record?.attributes?.Country || record?.attributes?.country || "",
-      record?.attributes?.["Compensation Grade"] || record?.attributes?.compensation_grade || "",
     ];
     lines.push(line.map(csvCell).join(","));
   }
@@ -821,8 +831,8 @@ async function load() {
       if (questionId.value.trim()) params.set("question_id", questionId.value.trim());
       if (minScore.value.trim()) params.set("min_score", minScore.value.trim());
       if (maxScore.value.trim()) params.set("max_score", maxScore.value.trim());
-      if (answeredFrom.value.trim()) params.set("answered_from", answeredFrom.value.trim());
-      if (answeredTo.value.trim()) params.set("answered_to", answeredTo.value.trim());
+      if (answeredFrom.value.trim()) params.set("answered_from", dateStartIso(answeredFrom.value));
+      if (answeredTo.value.trim()) params.set("answered_to", dateEndIso(answeredTo.value));
       if (hasComment.value) params.set("has_comment", hasComment.value);
       if (department.value.trim()) params.set("department", department.value.trim());
       if (subDepartment.value.trim()) params.set("sub_department", subDepartment.value.trim());
@@ -991,6 +1001,12 @@ function resetBirthdayFilters() {
   birthdayDepartmentPick.value = "";
 }
 
+function onAnswersManagerChange() {
+  if (managerId.value === ORPHANED_MANAGER_ID && !hasComment.value) {
+    hasComment.value = "true";
+  }
+}
+
 function syncOrgHeadcountManagerSelection() {
   const q = orgHeadcountManagerQuery.value.trim();
   if (!q) {
@@ -1027,8 +1043,8 @@ async function updateManagerOptions() {
     if (questionId.value.trim()) params.set("question_id", questionId.value.trim());
     if (minScore.value.trim()) params.set("min_score", minScore.value.trim());
     if (maxScore.value.trim()) params.set("max_score", maxScore.value.trim());
-    if (answeredFrom.value.trim()) params.set("answered_from", answeredFrom.value.trim());
-    if (answeredTo.value.trim()) params.set("answered_to", answeredTo.value.trim());
+    if (answeredFrom.value.trim()) params.set("answered_from", dateStartIso(answeredFrom.value));
+    if (answeredTo.value.trim()) params.set("answered_to", dateEndIso(answeredTo.value));
     if (hasComment.value) params.set("has_comment", hasComment.value);
     if (department.value.trim()) params.set("department", department.value.trim());
     if (subDepartment.value.trim()) params.set("sub_department", subDepartment.value.trim());
@@ -1215,7 +1231,13 @@ watch(orgMapSearch, (value) => {
   }, 250);
 });
 
-watch([activeView, limit], () => resetAndLoad());
+watch(activeView, () => {
+  if (activeView.value !== "answers_export" && managerId.value === ORPHANED_MANAGER_ID) {
+    managerId.value = "";
+  }
+  resetAndLoad();
+});
+watch(limit, () => resetAndLoad());
 
 onMounted(() => {
   document.addEventListener("fullscreenchange", onFullscreenChange);
@@ -1285,11 +1307,11 @@ onBeforeUnmount(() => {
         </label>
         <label>
           Answered from
-          <input v-model="answeredFrom" placeholder="2025-11-01T00:00:00Z" />
+          <input v-model="answeredFrom" type="date" />
         </label>
         <label>
           Answered to
-          <input v-model="answeredTo" placeholder="2025-12-01T00:00:00Z" />
+          <input v-model="answeredTo" type="date" />
         </label>
         <label>
           Has comment
@@ -1335,12 +1357,13 @@ onBeforeUnmount(() => {
         </label>
         <label>
           Manager
-          <select v-model="managerId">
+          <select v-model="managerId" @change="onAnswersManagerChange">
             <option value="">Any</option>
+            <option :value="ORPHANED_MANAGER_ID">Orphaned comments (&lt;5 employees / manager)</option>
             <option v-if="managerLoading" disabled>Loading managers...</option>
-            <option v-else-if="managerOptions.length === 0" disabled>No managers on page</option>
+            <option v-else-if="visibleManagerOptions.length === 0" disabled>No managers on page</option>
             <option
-              v-for="manager in managerOptions"
+              v-for="manager in visibleManagerOptions"
               :key="manager.id"
               :value="manager.id"
             >
