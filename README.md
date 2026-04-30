@@ -99,3 +99,13 @@ If `FULL_SYNC=false`, the ingestor will store a best-effort cursor per endpoint 
 ```bash
 pytest -q
 ```
+
+### Auditing manager question CSV hierarchy coverage
+
+If category/driver/subDriver values look sparse, run the lookup audit against the same report window:
+
+```bash
+PYTHONPATH=src python scripts/audit_manager_question_lookup.py --start 2026-01-01 --end 2026-03-31
+```
+
+The report shows how many `drivers_catalog` rows have sub-drivers, how many answers expose driver/question lookup keys, and how many answers actually match a catalog row with a sub-driver.
