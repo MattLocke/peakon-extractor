@@ -27,6 +27,32 @@ def as_id_set(value: Any) -> set[Any]:
 
 
 
+
+def scalar_attrs(doc: dict[str, Any]) -> dict[str, Any]:
+    attrs = doc.get("attributes") or {}
+    out: dict[str, Any] = {}
+    for key, value in attrs.items():
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            out[key] = value
+    return out
+
+
+def subdriver_keys(payload: Any, limit: int = 30) -> list[str]:
+    if isinstance(payload, dict):
+        return [str(key) for key in list(payload.keys())[:limit]]
+    if isinstance(payload, list):
+        keys: list[str] = []
+        for item in payload[:limit]:
+            if isinstance(item, dict):
+                for candidate in ("id", "key", "name", "label", "slug"):
+                    if item.get(candidate) not in (None, ""):
+                        keys.append(str(item.get(candidate)))
+                        break
+            else:
+                keys.append(str(item))
+        return keys
+    return []
+
 def truncate_jsonish(value: Any, *, max_chars: int = 1200) -> Any:
     text = json.dumps(value, default=str, ensure_ascii=False)
     if len(text) <= max_chars:
@@ -89,6 +115,8 @@ def main() -> None:
         if payload not in (None, "", [], {}) and len(raw_subdriver_examples) < args.sample:
             raw_subdriver_examples.append({
                 "driverId": str(doc.get("_id") or doc.get("id") or ""),
+                "scalarAttributes": scalar_attrs(doc),
+                "subdriverKeys": subdriver_keys(payload),
                 "subdriverPayloadExample": truncate_jsonish(payload),
             })
 
