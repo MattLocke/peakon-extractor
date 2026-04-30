@@ -7,13 +7,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import re
 from collections import Counter
 from typing import Any
 
 from peakon_api.db import get_db
-from peakon_api.main import _answer_driver_id, _as_lookup_ids, _nested_value
+from peakon_api.main import _answer_driver_id, _as_lookup_ids, _english_text, _nested_value
 
 
 def end_bound(value: str) -> str:
@@ -29,6 +30,7 @@ def main() -> None:
     parser.add_argument("--start", required=True, help="Inclusive responseAnsweredAt start date/timestamp")
     parser.add_argument("--end", required=True, help="Inclusive responseAnsweredAt end date/timestamp")
     parser.add_argument("--sample", type=int, default=10, help="Number of sample missing IDs to print")
+    parser.add_argument("--missing-csv", help="Optional path to write missing questionId examples for lookup-table completion")
     args = parser.parse_args()
 
     db = get_db()
@@ -53,6 +55,7 @@ def main() -> None:
     no_lookup_key = 0
     missing_driver_ids: Counter[str] = Counter()
     missing_question_ids: Counter[str] = Counter()
+    question_text_examples: dict[str, Counter[str]] = {}
 
     cursor = db.answers_export.find(query, {"attributes": 1, "relationships": 1})
     for answer in cursor:
@@ -81,7 +84,11 @@ def main() -> None:
         if question_doc:
             matched_by_question += 1
         elif question_id not in (None, ""):
-            missing_question_ids[str(question_id)] += 1
+            question_key = str(question_id)
+            missing_question_ids[question_key] += 1
+            question_text = _english_text(attrs.get("questionText") or attrs.get("question") or "")
+            if question_text:
+                question_text_examples.setdefault(question_key, Counter())[question_text] += 1
         if doc and (doc.get("subdriver") or doc.get("subDriver")):
             matched_with_subdriver += 1
 
@@ -112,8 +119,29 @@ def main() -> None:
             "topQuestionIdsInAnswers": question_ids.most_common(args.sample),
             "missingDriverIds": missing_driver_ids.most_common(args.sample),
             "missingQuestionIds": missing_question_ids.most_common(args.sample),
+            "missingQuestionTextExamples": [
+                {
+                    "questionId": question_id,
+                    "answerCount": count,
+                    "questionText": (question_text_examples.get(question_id) or Counter()).most_common(1)[0][0]
+                    if question_text_examples.get(question_id)
+                    else "",
+                }
+                for question_id, count in missing_question_ids.most_common(args.sample)
+            ],
         },
     }
+
+    if args.missing_csv:
+        with open(args.missing_csv, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(["questionId", "answerCount", "questionText", "category", "driver", "subDriver"])
+            for question_id, count in missing_question_ids.most_common():
+                examples = question_text_examples.get(question_id) or Counter()
+                question_text = examples.most_common(1)[0][0] if examples else ""
+                writer.writerow([question_id, count, question_text, "", "", ""])
+        report["missingCsv"] = args.missing_csv
+
     print(json.dumps(report, indent=2, default=str))
 
 
