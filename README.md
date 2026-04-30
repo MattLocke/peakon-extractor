@@ -115,3 +115,11 @@ PYTHONPATH=src python scripts/audit_manager_question_lookup.py --start 2026-01-0
 ```
 
 The report shows how many `drivers_catalog` rows have sub-drivers, whether the raw `drivers` collection appears to contain sub-driver/question-shaped fields, how many answers expose driver/question lookup keys, and how many answers actually match a catalog row with a sub-driver. The optional CSV includes missing `questionId`, answer count, and representative English question text with blank category/driver/subDriver columns for lookup completion.
+
+If the raw driver data has subdriver score buckets but no numeric question IDs, probe Peakon for a question metadata endpoint:
+
+```bash
+python scripts/probe_peakon_question_metadata.py --driver-id engagement --all
+```
+
+Run this inside the API container so it uses the same Peakon auth/config as the app. A useful endpoint should return records with question IDs/text plus driver/subdriver metadata.
