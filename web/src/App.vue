@@ -82,6 +82,7 @@ const orgClusterSpread = ref(1.8);
 const orgHideUnassigned = ref(true);
 const orgTreeSeparateDepartments = ref(true);
 const orgHierarchyGroupByDepartment = ref(true);
+const orgShowGroupBoxes = ref(true);
 const orgColorMode = ref("department");
 const orgRadialLayerGap = ref(1.2);
 const orgTreeSpreadX = ref(2.4);
@@ -473,7 +474,7 @@ const edgesToRender = computed(() => {
   return filteredOrgEdges.value;
 });
 const treeDepartmentOutlines = computed(() => {
-  if (orgLayoutMode.value !== "hierarchy_tree") return [];
+  if (orgLayoutMode.value !== "hierarchy_tree" || !orgShowGroupBoxes.value) return [];
 
   const deptSet = new Set(
     nodesToRender.value
@@ -1167,6 +1168,7 @@ function loadPeopleOrgPreset() {
   orgLayoutMode.value = "hierarchy_tree";
   orgTreeSeparateDepartments.value = false;
   orgColorMode.value = "department";
+  orgShowGroupBoxes.value = false;
   selectedOrgNodeId.value = "";
   resetOrgPan();
   resetAndLoad();
@@ -1600,6 +1602,10 @@ onBeforeUnmount(() => {
         <label class="toggle-inline" v-if="orgLayoutMode === 'hierarchy_tree'">
           <input type="checkbox" v-model="orgTreeSeparateDepartments" />
           Separate dept bands
+        </label>
+        <label class="toggle-inline" v-if="orgLayoutMode === 'hierarchy_tree'">
+          <input type="checkbox" v-model="orgShowGroupBoxes" />
+          Show colored group boxes
         </label>
       </div>
 
