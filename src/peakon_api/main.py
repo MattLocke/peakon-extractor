@@ -717,7 +717,28 @@ def _score_time(score_doc: Dict[str, Any]) -> str:
     return str(raw or "")
 
 
-def _engagement_scores_by_employee(db: Any, employee_ids: List[Any]) -> Dict[str, Dict[str, Any]]:
+def _score_context_matches_metric(score_doc: Dict[str, Any], metric_key: str) -> bool:
+    if metric_key == "engagement":
+        return True
+    haystack = [
+        score_doc.get("driver_id"),
+        _nested_value(score_doc, "attributes.driver_id", "attributes.driverId"),
+        _nested_value(score_doc, "attributes.group", "attributes.category", "attributes.driver", "attributes.subdriver", "attributes.subDriver"),
+    ]
+    target = metric_key.lower()
+    return any(target in str(value or "").strip().lower() for value in haystack)
+
+
+def _answer_matches_metric(answer: Dict[str, Any], catalog: Dict[str, Dict[str, Any]], metric_key: str) -> bool:
+    category, driver, subdriver = _answer_hierarchy(answer, catalog)
+    parts = [category, driver, subdriver]
+    target = metric_key.lower()
+    if metric_key == "engagement":
+        return not category or str(category).strip().lower() == "engagement"
+    return any(target in str(part or "").strip().lower() for part in parts)
+
+
+def _metric_scores_by_employee(db: Any, employee_ids: List[Any], metric_key: str) -> Dict[str, Dict[str, Any]]:
     lookup_ids = _id_lookup_values(employee_ids)
     if not lookup_ids:
         return {}
@@ -733,11 +754,7 @@ def _engagement_scores_by_employee(db: Any, employee_ids: List[Any]) -> Dict[str
     query = {"$or": [{field: {"$in": lookup_ids}} for field in id_fields]}
     projection = {
         "_id": 1,
-        "attributes.employeeId": 1,
-        "attributes.employee_id": 1,
-        "attributes.respondentEmployeeId": 1,
-        "attributes.respondent_employee_id": 1,
-        "attributes.scores": 1,
+        "attributes": 1,
         "employeeId": 1,
         "employee_id": 1,
         "scores": 1,
@@ -751,6 +768,8 @@ def _engagement_scores_by_employee(db: Any, employee_ids: List[Any]) -> Dict[str
         score_docs = []
 
     for doc in score_docs:
+        if not _score_context_matches_metric(doc, metric_key):
+            continue
         employee_id = _score_employee_id(doc)
         score = _score_mean(doc)
         if employee_id in (None, "") or score is None:
@@ -759,12 +778,11 @@ def _engagement_scores_by_employee(db: Any, employee_ids: List[Any]) -> Dict[str
         time_value = _score_time(doc)
         current = by_employee.get(key)
         if current is None or time_value >= str(current.get("time") or ""):
-            by_employee[key] = {"engagement": round(score, 2), "time": time_value, "source": "scores_contexts"}
+            by_employee[key] = {metric_key: round(score, 2), "time": time_value, "source": "scores_contexts"}
 
     # Most Peakon score context docs are aggregate segments, not employee rows.
     # When employee-level score rows are absent, derive a practical individual
-    # engagement signal from the raw answer export by averaging each employee's
-    # engagement answer scores in the current database.
+    # metric signal from raw answer export by averaging matching answer scores.
     missing_ids = [employee_id for employee_id in lookup_ids if str(employee_id) not in by_employee]
     if not missing_ids:
         return by_employee
@@ -792,8 +810,7 @@ def _engagement_scores_by_employee(db: Any, employee_ids: List[Any]) -> Dict[str
         employee_id = attrs.get("employeeId")
         if employee_id in (None, "") or str(employee_id) in by_employee:
             continue
-        category, _driver, _subdriver = _answer_hierarchy(answer, catalog)
-        if category and str(category).strip().lower() != "engagement":
+        if not _answer_matches_metric(answer, catalog, metric_key):
             continue
         score = _coerce_float(attrs.get("answerScore"))
         if score is None:
@@ -809,13 +826,21 @@ def _engagement_scores_by_employee(db: Any, employee_ids: List[Any]) -> Dict[str
         if not scores:
             continue
         by_employee[employee_id] = {
-            "engagement": round(sum(scores) / len(scores), 2),
+            metric_key: round(sum(scores) / len(scores), 2),
             "time": data.get("latest") or "",
             "source": "answers_export",
             "responseCount": len(scores),
         }
 
     return by_employee
+
+
+def _engagement_scores_by_employee(db: Any, employee_ids: List[Any]) -> Dict[str, Dict[str, Any]]:
+    return _metric_scores_by_employee(db, employee_ids, "engagement")
+
+
+def _autonomy_scores_by_employee(db: Any, employee_ids: List[Any]) -> Dict[str, Dict[str, Any]]:
+    return _metric_scores_by_employee(db, employee_ids, "autonomy")
 
 
 def _answer_employees_for_query(query: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -1584,13 +1609,19 @@ def org_map(
         payload["stats"]["renderedNodes"] = len(payload["nodes"])
         payload["stats"]["renderedEdges"] = len(payload["edges"])
 
-    engagement_scores = _engagement_scores_by_employee(db, [node.get("id") for node in payload.get("nodes", [])])
-    nodes_with_engagement = 0
-    for node in payload.get("nodes", []):
-        metrics = engagement_scores.get(str(node.get("id")))
-        if metrics:
-            node["metrics"] = {**(node.get("metrics") or {}), **metrics}
-            nodes_with_engagement += 1
-    payload.setdefault("stats", {})["nodesWithEngagement"] = nodes_with_engagement
+    org_node_ids = [node.get("id") for node in payload.get("nodes", [])]
+    metric_sources = {
+        "engagement": _engagement_scores_by_employee(db, org_node_ids),
+        "autonomy": _autonomy_scores_by_employee(db, org_node_ids),
+    }
+    for metric_key, metric_scores in metric_sources.items():
+        nodes_with_metric = 0
+        for node in payload.get("nodes", []):
+            metrics = metric_scores.get(str(node.get("id")))
+            if metrics:
+                node["metrics"] = {**(node.get("metrics") or {}), **metrics}
+                nodes_with_metric += 1
+        stat_name = f"nodesWith{metric_key[:1].upper()}{metric_key[1:]}"
+        payload.setdefault("stats", {})[stat_name] = nodes_with_metric
 
     return _serialize(payload)

@@ -116,3 +116,46 @@ def test_engagement_scores_by_employee_falls_back_to_answer_scores():
         "responseCount": 2,
     }
     assert "2" not in scores
+
+
+def test_autonomy_scores_by_employee_falls_back_to_matching_answer_hierarchy():
+    from peakon_api.main import _autonomy_scores_by_employee
+
+    db = ScoreDb([], [
+        {
+            "_id": "a1",
+            "attributes": {
+                "employeeId": 1,
+                "answerScore": 9,
+                "responseAnsweredAt": "2026-01-01",
+                "subDriver": "Autonomy",
+            },
+        },
+        {
+            "_id": "a2",
+            "attributes": {
+                "employeeId": "1",
+                "answerScore": 5,
+                "responseAnsweredAt": "2026-02-01",
+                "driver": "Autonomy",
+            },
+        },
+        {
+            "_id": "a3",
+            "attributes": {
+                "employeeId": 1,
+                "answerScore": 1,
+                "responseAnsweredAt": "2026-02-01",
+                "driver": "Recognition",
+            },
+        },
+    ])
+
+    scores = _autonomy_scores_by_employee(db, [1])
+
+    assert scores["1"] == {
+        "autonomy": 7.0,
+        "time": "2026-02-01",
+        "source": "answers_export",
+        "responseCount": 2,
+    }

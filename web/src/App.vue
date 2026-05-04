@@ -593,6 +593,24 @@ function orgMetricValue(node, key) {
   return undefined;
 }
 
+function orgActiveMetricKey() {
+  if (orgColorMode.value === "engagement") return "engagement";
+  if (orgColorMode.value === "autonomy") return "autonomy";
+  return "";
+}
+
+function orgActiveMetricLabel() {
+  const key = orgActiveMetricKey();
+  if (!key) return "";
+  return key.charAt(0).toUpperCase() + key.slice(1);
+}
+
+function orgActiveMetricCount() {
+  const label = orgActiveMetricLabel();
+  if (!label) return 0;
+  return orgMap.value.stats?.[`nodesWith${label}`] ?? 0;
+}
+
 function showOrgLabels() {
   if (orgLayoutMode.value === "hierarchy_tree") return orgMapZoom.value >= 1;
   return orgMapZoom.value >= 1.5;
@@ -600,7 +618,7 @@ function showOrgLabels() {
 
 function orgNodeFill(node) {
   if (selectedOrgNodeId.value === node.id) return "#22c55e";
-  if (orgColorMode.value === "engagement") return scoreColor(orgMetricValue(node, "engagement"));
+  if (orgActiveMetricKey()) return scoreColor(orgMetricValue(node, orgActiveMetricKey()));
   if (orgLayoutMode.value === "knn") {
     if (selectedKnnNeighbors.value.has(node.id)) return "#f59e0b";
     return node.groupColor || groupColor(clusterKeyForNode(node));
@@ -1522,7 +1540,8 @@ onBeforeUnmount(() => {
           Node color
           <select v-model="orgColorMode">
             <option value="department">Department / layout</option>
-            <option value="engagement">Engagement score ready</option>
+            <option value="engagement">Engagement</option>
+            <option value="autonomy">Autonomy</option>
           </select>
         </label>
         <label>
@@ -1843,7 +1862,7 @@ onBeforeUnmount(() => {
       <span>{{ nodesToRender.length }} shown / {{ orgMap.stats?.employees || 0 }} total employees</span>
       <span>Depth {{ orgMap.stats?.maxDepth ?? 0 }}</span>
       <span>Orphans {{ orgMap.stats?.orphans ?? 0 }}</span>
-      <span v-if="orgColorMode === 'engagement'">Engagement scores {{ orgMap.stats?.nodesWithEngagement ?? 0 }}</span>
+      <span v-if="orgActiveMetricKey()">{{ orgActiveMetricLabel() }} scores {{ orgActiveMetricCount() }}</span>
     </section>
 
     <section v-else-if="activeView === 'org_headcount'" class="pager">
@@ -1974,8 +1993,8 @@ onBeforeUnmount(() => {
           <p><strong>Email:</strong> {{ selectedOrgNode.email || '—' }}</p>
           <p><strong>Direct reports:</strong> {{ selectedOrgNode.directReports ?? 0 }}</p>
           <p><strong>Subtree size:</strong> {{ selectedOrgNode.subtreeSize ?? 1 }}</p>
-          <p v-if="orgColorMode === 'engagement'"><strong>Engagement:</strong> {{ orgMetricValue(selectedOrgNode, 'engagement') ?? 'No score yet' }}</p>
-          <p v-if="orgColorMode === 'engagement' && selectedOrgNode.metrics?.source" class="subtle">Source: {{ selectedOrgNode.metrics.source }}<span v-if="selectedOrgNode.metrics.responseCount"> · {{ selectedOrgNode.metrics.responseCount }} responses</span></p>
+          <p v-if="orgActiveMetricKey()"><strong>{{ orgActiveMetricLabel() }}:</strong> {{ orgMetricValue(selectedOrgNode, orgActiveMetricKey()) ?? 'No score yet' }}</p>
+          <p v-if="orgActiveMetricKey() && selectedOrgNode.metrics?.source" class="subtle">Source: {{ selectedOrgNode.metrics.source }}<span v-if="selectedOrgNode.metrics.responseCount"> · {{ selectedOrgNode.metrics.responseCount }} responses</span></p>
           <div class="action-row compact">
             <button @click="focusOnSelectedManager">Focus this subtree</button>
           </div>
@@ -1999,8 +2018,8 @@ onBeforeUnmount(() => {
           </div>
         </template>
 
-        <div v-if="orgColorMode === 'engagement'" class="org-legend">
-          <strong>Engagement color scale</strong>
+        <div v-if="orgActiveMetricKey()" class="org-legend">
+          <strong>{{ orgActiveMetricLabel() }} color scale</strong>
           <ul>
             <li class="org-legend-row"><span class="org-legend-dot" style="background-color: #ef4444"></span><span>Low (&lt;4)</span></li>
             <li class="org-legend-row"><span class="org-legend-dot" style="background-color: #f59e0b"></span><span>Mixed (4-5.9)</span></li>
