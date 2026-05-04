@@ -78,8 +78,9 @@ class ScoreCollection:
 
 
 class ScoreDb:
-    def __init__(self, scores):
+    def __init__(self, scores, answers=None):
         self.scores_contexts = ScoreCollection(scores)
+        self.answers_export = ScoreCollection(answers or [])
 
 
 def test_engagement_scores_by_employee_uses_latest_mean():
@@ -93,5 +94,25 @@ def test_engagement_scores_by_employee_uses_latest_mean():
 
     scores = _engagement_scores_by_employee(db, [1, 2])
 
-    assert scores["1"] == {"engagement": 7.6, "time": "2026-02"}
+    assert scores["1"] == {"engagement": 7.6, "time": "2026-02", "source": "scores_contexts"}
+    assert "2" not in scores
+
+
+def test_engagement_scores_by_employee_falls_back_to_answer_scores():
+    from peakon_api.main import _engagement_scores_by_employee
+
+    db = ScoreDb([], [
+        {"_id": "a1", "attributes": {"employeeId": 1, "answerScore": 8, "responseAnsweredAt": "2026-01-01"}},
+        {"_id": "a2", "attributes": {"employeeId": "1", "answerScore": 6, "responseAnsweredAt": "2026-02-01"}},
+        {"_id": "a3", "attributes": {"employeeId": 2, "answerScore": "", "responseAnsweredAt": "2026-02-01"}},
+    ])
+
+    scores = _engagement_scores_by_employee(db, [1, 2])
+
+    assert scores["1"] == {
+        "engagement": 7.0,
+        "time": "2026-02-01",
+        "source": "answers_export",
+        "responseCount": 2,
+    }
     assert "2" not in scores

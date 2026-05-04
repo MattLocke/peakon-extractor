@@ -745,7 +745,12 @@ def _engagement_scores_by_employee(db: Any, employee_ids: List[Any]) -> Dict[str
     }
 
     by_employee: Dict[str, Dict[str, Any]] = {}
-    for doc in db.scores_contexts.find(query, projection):
+    try:
+        score_docs = db.scores_contexts.find(query, projection)
+    except Exception:
+        score_docs = []
+
+    for doc in score_docs:
         employee_id = _score_employee_id(doc)
         score = _score_mean(doc)
         if employee_id in (None, "") or score is None:
@@ -754,7 +759,61 @@ def _engagement_scores_by_employee(db: Any, employee_ids: List[Any]) -> Dict[str
         time_value = _score_time(doc)
         current = by_employee.get(key)
         if current is None or time_value >= str(current.get("time") or ""):
-            by_employee[key] = {"engagement": round(score, 2), "time": time_value}
+            by_employee[key] = {"engagement": round(score, 2), "time": time_value, "source": "scores_contexts"}
+
+    # Most Peakon score context docs are aggregate segments, not employee rows.
+    # When employee-level score rows are absent, derive a practical individual
+    # engagement signal from the raw answer export by averaging each employee's
+    # engagement answer scores in the current database.
+    missing_ids = [employee_id for employee_id in lookup_ids if str(employee_id) not in by_employee]
+    if not missing_ids:
+        return by_employee
+
+    answer_query = {"attributes.employeeId": {"$in": missing_ids}}
+    answer_projection = {"_id": 1, "attributes": 1, "relationships": 1}
+    try:
+        answers = list(db.answers_export.find(answer_query, answer_projection))
+    except Exception:
+        answers = []
+    if not answers:
+        return by_employee
+
+    driver_ids = {_answer_driver_id(answer) for answer in answers if _answer_driver_id(answer) not in (None, "")}
+    question_ids = {
+        answer.get("attributes", {}).get("questionId")
+        for answer in answers
+        if answer.get("attributes", {}).get("questionId") not in (None, "")
+    }
+    catalog = _driver_lookup(db, driver_ids, question_ids)
+
+    grouped: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"scores": [], "latest": ""})
+    for answer in answers:
+        attrs = answer.get("attributes") or {}
+        employee_id = attrs.get("employeeId")
+        if employee_id in (None, "") or str(employee_id) in by_employee:
+            continue
+        category, _driver, _subdriver = _answer_hierarchy(answer, catalog)
+        if category and str(category).strip().lower() != "engagement":
+            continue
+        score = _coerce_float(attrs.get("answerScore"))
+        if score is None:
+            continue
+        key = str(employee_id)
+        grouped[key]["scores"].append(score)
+        answered_at = str(attrs.get("responseAnsweredAt") or "")
+        if answered_at >= grouped[key]["latest"]:
+            grouped[key]["latest"] = answered_at
+
+    for employee_id, data in grouped.items():
+        scores = data["scores"]
+        if not scores:
+            continue
+        by_employee[employee_id] = {
+            "engagement": round(sum(scores) / len(scores), 2),
+            "time": data.get("latest") or "",
+            "source": "answers_export",
+            "responseCount": len(scores),
+        }
 
     return by_employee
 

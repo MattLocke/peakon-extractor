@@ -1969,6 +1969,7 @@ onBeforeUnmount(() => {
           <p><strong>Direct reports:</strong> {{ selectedOrgNode.directReports ?? 0 }}</p>
           <p><strong>Subtree size:</strong> {{ selectedOrgNode.subtreeSize ?? 1 }}</p>
           <p v-if="orgColorMode === 'engagement'"><strong>Engagement:</strong> {{ orgMetricValue(selectedOrgNode, 'engagement') ?? 'No score yet' }}</p>
+          <p v-if="orgColorMode === 'engagement' && selectedOrgNode.metrics?.source" class="subtle">Source: {{ selectedOrgNode.metrics.source }}<span v-if="selectedOrgNode.metrics.responseCount"> · {{ selectedOrgNode.metrics.responseCount }} responses</span></p>
           <div class="action-row compact">
             <button @click="focusOnSelectedManager">Focus this subtree</button>
           </div>
