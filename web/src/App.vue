@@ -574,6 +574,7 @@ function orgNodeRadius(node) {
 }
 
 function scoreColor(score) {
+  if (score === undefined || score === null || score === "") return "#94a3b8";
   const value = Number(score);
   if (!Number.isFinite(value)) return "#94a3b8";
   if (value >= 8) return "#22c55e";
@@ -584,7 +585,11 @@ function scoreColor(score) {
 
 function orgMetricValue(node, key) {
   const metrics = node.metrics || {};
-  return metrics[key] ?? node[key] ?? null;
+  const metricValue = metrics[key];
+  if (metricValue !== undefined && metricValue !== null && metricValue !== "") return metricValue;
+  const nodeValue = node[key];
+  if (nodeValue !== undefined && nodeValue !== null && nodeValue !== "") return nodeValue;
+  return undefined;
 }
 
 function showOrgLabels() {
