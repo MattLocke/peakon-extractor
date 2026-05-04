@@ -54,3 +54,44 @@ def test_org_map_filter_query_accepts_people_subdepartment():
     assert "$and" in query
     assert any("attributes.Department" in option for option in query["$and"][0]["$or"])
     assert any("attributes.Sub-Department" in option for option in query["$and"][1]["$or"])
+
+
+class ScoreCollection:
+    def __init__(self, docs):
+        self.docs = docs
+
+    def find(self, query=None, projection=None):
+        query = query or {}
+        allowed = set()
+        for clause in query.get("$or", []):
+            for _field, condition in clause.items():
+                allowed.update(str(v) for v in condition.get("$in", []))
+        if not allowed:
+            return list(self.docs)
+        out = []
+        for doc in self.docs:
+            attrs = doc.get("attributes") or {}
+            emp_id = attrs.get("employeeId") or attrs.get("employee_id") or doc.get("employeeId") or doc.get("employee_id")
+            if str(emp_id) in allowed:
+                out.append(doc)
+        return out
+
+
+class ScoreDb:
+    def __init__(self, scores):
+        self.scores_contexts = ScoreCollection(scores)
+
+
+def test_engagement_scores_by_employee_uses_latest_mean():
+    from peakon_api.main import _engagement_scores_by_employee
+
+    db = ScoreDb([
+        {"_id": "old", "attributes": {"employeeId": 1, "scores": {"mean": 4.2, "time": "2026-01"}}},
+        {"_id": "new", "attributes": {"employeeId": "1", "scores": {"mean": 7.6, "time": "2026-02"}}},
+        {"_id": "missing", "attributes": {"employeeId": 2, "scores": {"time": "2026-02"}}},
+    ])
+
+    scores = _engagement_scores_by_employee(db, [1, 2])
+
+    assert scores["1"] == {"engagement": 7.6, "time": "2026-02"}
+    assert "2" not in scores

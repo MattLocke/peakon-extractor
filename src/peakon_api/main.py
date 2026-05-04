@@ -679,6 +679,86 @@ def _apply_employee_scope_filter(
     return {"$and": [base_query, id_match]}
 
 
+def _coerce_float(value: Any) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _score_employee_id(score_doc: Dict[str, Any]) -> Any:
+    return _nested_value(
+        score_doc,
+        "attributes.employeeId",
+        "attributes.employee_id",
+        "employeeId",
+        "employee_id",
+        "attributes.respondentEmployeeId",
+        "attributes.respondent_employee_id",
+    )
+
+
+def _score_mean(score_doc: Dict[str, Any]) -> Optional[float]:
+    return _coerce_float(
+        _nested_value(
+            score_doc,
+            "attributes.scores.mean",
+            "scores.mean",
+            "attributes.mean",
+            "mean",
+        )
+    )
+
+
+def _score_time(score_doc: Dict[str, Any]) -> str:
+    raw = _nested_value(score_doc, "attributes.scores.time", "scores.time", "time")
+    return str(raw or "")
+
+
+def _engagement_scores_by_employee(db: Any, employee_ids: List[Any]) -> Dict[str, Dict[str, Any]]:
+    lookup_ids = _id_lookup_values(employee_ids)
+    if not lookup_ids:
+        return {}
+
+    id_fields = [
+        "attributes.employeeId",
+        "attributes.employee_id",
+        "employeeId",
+        "employee_id",
+        "attributes.respondentEmployeeId",
+        "attributes.respondent_employee_id",
+    ]
+    query = {"$or": [{field: {"$in": lookup_ids}} for field in id_fields]}
+    projection = {
+        "_id": 1,
+        "attributes.employeeId": 1,
+        "attributes.employee_id": 1,
+        "attributes.respondentEmployeeId": 1,
+        "attributes.respondent_employee_id": 1,
+        "attributes.scores": 1,
+        "employeeId": 1,
+        "employee_id": 1,
+        "scores": 1,
+        "driver_id": 1,
+    }
+
+    by_employee: Dict[str, Dict[str, Any]] = {}
+    for doc in db.scores_contexts.find(query, projection):
+        employee_id = _score_employee_id(doc)
+        score = _score_mean(doc)
+        if employee_id in (None, "") or score is None:
+            continue
+        key = str(employee_id)
+        time_value = _score_time(doc)
+        current = by_employee.get(key)
+        if current is None or time_value >= str(current.get("time") or ""):
+            by_employee[key] = {"engagement": round(score, 2), "time": time_value}
+
+    return by_employee
+
+
 def _answer_employees_for_query(query: Dict[str, Any]) -> List[Dict[str, Any]]:
     db = get_db()
     answer_employee_ids = db.answers_export.distinct("attributes.employeeId", query)
@@ -1415,6 +1495,7 @@ def org_map(
     employees = list(db.employees.find(query, {"_id": 1, "attributes": 1, "relationships": 1}))
     payload = build_org_map_payload(employees)
 
+
     if manager_id:
         manager_str = str(manager_id)
         node_lookup = {node["id"]: node for node in payload["nodes"]}
@@ -1443,5 +1524,14 @@ def org_map(
         payload["rootId"] = manager_str
         payload["stats"]["renderedNodes"] = len(payload["nodes"])
         payload["stats"]["renderedEdges"] = len(payload["edges"])
+
+    engagement_scores = _engagement_scores_by_employee(db, [node.get("id") for node in payload.get("nodes", [])])
+    nodes_with_engagement = 0
+    for node in payload.get("nodes", []):
+        metrics = engagement_scores.get(str(node.get("id")))
+        if metrics:
+            node["metrics"] = {**(node.get("metrics") or {}), **metrics}
+            nodes_with_engagement += 1
+    payload.setdefault("stats", {})["nodesWithEngagement"] = nodes_with_engagement
 
     return _serialize(payload)

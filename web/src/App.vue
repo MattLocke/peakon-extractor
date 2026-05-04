@@ -1837,6 +1837,7 @@ onBeforeUnmount(() => {
       <span>{{ nodesToRender.length }} shown / {{ orgMap.stats?.employees || 0 }} total employees</span>
       <span>Depth {{ orgMap.stats?.maxDepth ?? 0 }}</span>
       <span>Orphans {{ orgMap.stats?.orphans ?? 0 }}</span>
+      <span v-if="orgColorMode === 'engagement'">Engagement scores {{ orgMap.stats?.nodesWithEngagement ?? 0 }}</span>
     </section>
 
     <section v-else-if="activeView === 'org_headcount'" class="pager">
@@ -1967,6 +1968,7 @@ onBeforeUnmount(() => {
           <p><strong>Email:</strong> {{ selectedOrgNode.email || '—' }}</p>
           <p><strong>Direct reports:</strong> {{ selectedOrgNode.directReports ?? 0 }}</p>
           <p><strong>Subtree size:</strong> {{ selectedOrgNode.subtreeSize ?? 1 }}</p>
+          <p v-if="orgColorMode === 'engagement'"><strong>Engagement:</strong> {{ orgMetricValue(selectedOrgNode, 'engagement') ?? 'No score yet' }}</p>
           <div class="action-row compact">
             <button @click="focusOnSelectedManager">Focus this subtree</button>
           </div>
@@ -1999,7 +2001,7 @@ onBeforeUnmount(() => {
             <li class="org-legend-row"><span class="org-legend-dot" style="background-color: #22c55e"></span><span>High (8+)</span></li>
             <li class="org-legend-row"><span class="org-legend-dot" style="background-color: #94a3b8"></span><span>No score yet</span></li>
           </ul>
-          <p class="subtle">Engagement coloring is wired for future node metrics; current org data may show gray until scores are joined.</p>
+          <p class="subtle">Uses the latest available employee engagement mean from score contexts; gray means no score joined for that employee.</p>
         </div>
 
         <div v-if="radialDepartmentLegend.length" class="org-legend">
