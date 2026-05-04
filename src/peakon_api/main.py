@@ -1404,17 +1404,13 @@ def org_headcount_managers(
 
 
 @app.get("/org_map")
-def org_map(department: Optional[str] = None, manager_id: Optional[str] = None) -> Dict[str, Any]:
+def org_map(
+    department: Optional[str] = None,
+    sub_department: Optional[str] = None,
+    manager_id: Optional[str] = None,
+) -> Dict[str, Any]:
     db = get_db()
-    query: Dict[str, Any] = {}
-
-    department_values = _csv_values(department)
-    if department_values:
-        query["$or"] = []
-        for dep in department_values:
-            pattern = {"$regex": re.escape(dep), "$options": "i"}
-            query["$or"].append({"attributes.Department": pattern})
-            query["$or"].append({"attributes.department": pattern})
+    query = _employee_filter_query(department, sub_department, None) or {}
 
     employees = list(db.employees.find(query, {"_id": 1, "attributes": 1, "relationships": 1}))
     payload = build_org_map_payload(employees)

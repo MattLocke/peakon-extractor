@@ -72,6 +72,9 @@ const debouncedOrgMapSearch = ref("");
 const orgMapDepartment = ref("");
 const orgMapDepartmentInput = ref("");
 const selectedOrgDepartments = ref([]);
+const orgMapSubDepartment = ref("");
+const orgMapSubDepartmentInput = ref("");
+const selectedOrgSubDepartments = ref([]);
 const orgMapManagerFocus = ref("");
 const orgLayoutMode = ref("hierarchy_tree");
 const orgClusterBy = ref("department");
@@ -79,6 +82,7 @@ const orgClusterSpread = ref(1.8);
 const orgHideUnassigned = ref(true);
 const orgTreeSeparateDepartments = ref(true);
 const orgHierarchyGroupByDepartment = ref(true);
+const orgColorMode = ref("department");
 const orgRadialLayerGap = ref(1.2);
 const orgTreeSpreadX = ref(2.4);
 const orgTreeSpreadY = ref(4.8);
@@ -569,6 +573,20 @@ function orgNodeRadius(node) {
   return Math.max(4, base + Math.min(4, (node.directReports || 0) / 5));
 }
 
+function scoreColor(score) {
+  const value = Number(score);
+  if (!Number.isFinite(value)) return "#94a3b8";
+  if (value >= 8) return "#22c55e";
+  if (value >= 6) return "#84cc16";
+  if (value >= 4) return "#f59e0b";
+  return "#ef4444";
+}
+
+function orgMetricValue(node, key) {
+  const metrics = node.metrics || {};
+  return metrics[key] ?? node[key] ?? null;
+}
+
 function showOrgLabels() {
   if (orgLayoutMode.value === "hierarchy_tree") return orgMapZoom.value >= 1;
   return orgMapZoom.value >= 1.5;
@@ -576,6 +594,7 @@ function showOrgLabels() {
 
 function orgNodeFill(node) {
   if (selectedOrgNodeId.value === node.id) return "#22c55e";
+  if (orgColorMode.value === "engagement") return scoreColor(orgMetricValue(node, "engagement"));
   if (orgLayoutMode.value === "knn") {
     if (selectedKnnNeighbors.value.has(node.id)) return "#f59e0b";
     return node.groupColor || groupColor(clusterKeyForNode(node));
@@ -770,6 +789,7 @@ async function load() {
     if (activeView.value === "org_map") {
       const orgParams = new URLSearchParams();
       if (orgMapDepartment.value.trim()) orgParams.set("department", orgMapDepartment.value.trim());
+      if (orgMapSubDepartment.value.trim()) orgParams.set("sub_department", orgMapSubDepartment.value.trim());
       if (orgMapManagerFocus.value.trim()) orgParams.set("manager_id", orgMapManagerFocus.value.trim());
       const res = await fetch(`${API_BASE}/org_map?${orgParams.toString()}`);
       if (!res.ok) {
@@ -1132,6 +1152,21 @@ function resetAndLoad() {
   load();
 }
 
+function loadPeopleOrgPreset() {
+  activeView.value = "org_map";
+  selectedOrgDepartments.value = ["General and Administrative"];
+  selectedOrgSubDepartments.value = ["People"];
+  orgMapDepartment.value = "General and Administrative";
+  orgMapSubDepartment.value = "People";
+  orgMapManagerFocus.value = "";
+  orgLayoutMode.value = "hierarchy_tree";
+  orgTreeSeparateDepartments.value = false;
+  orgColorMode.value = "department";
+  selectedOrgNodeId.value = "";
+  resetOrgPan();
+  resetAndLoad();
+}
+
 function focusOnSelectedManager() {
   if (!selectedOrgNodeId.value) return;
   orgMapManagerFocus.value = selectedOrgNodeId.value;
@@ -1260,6 +1295,9 @@ watch(selectedSubDepartments, (vals) => {
 });
 watch(selectedOrgDepartments, (vals) => {
   orgMapDepartment.value = vals.join(",");
+});
+watch(selectedOrgSubDepartments, (vals) => {
+  orgMapSubDepartment.value = vals.join(",");
 });
 
 watch(orgMapSearch, (value) => {
@@ -1433,6 +1471,24 @@ onBeforeUnmount(() => {
           </div>
         </label>
         <label>
+          Sub-department filter(s)
+          <input
+            v-model="orgMapSubDepartmentInput"
+            list="subdepartment-options"
+            placeholder="Add sub-department + Enter"
+            @keydown.enter.prevent="addChip(orgMapSubDepartmentInput, selectedOrgSubDepartments)"
+          />
+          <div class="chip-row">
+            <button type="button" class="chip" v-for="sub in selectedOrgSubDepartments" :key="`org-sub-${sub}`" @click="removeChip(selectedOrgSubDepartments, sub)">
+              {{ sub }} ✕
+            </button>
+          </div>
+        </label>
+        <label>
+          People preset
+          <button type="button" class="preset-button" @click="loadPeopleOrgPreset">Load People org</button>
+        </label>
+        <label>
           Manager subtree ID
           <input v-model="orgMapManagerFocus" placeholder="optional manager id" />
         </label>
@@ -1453,6 +1509,13 @@ onBeforeUnmount(() => {
             <option value="manager">Manager</option>
             <option value="country">Country</option>
             <option value="title">Title</option>
+          </select>
+        </label>
+        <label>
+          Node color
+          <select v-model="orgColorMode">
+            <option value="department">Department / layout</option>
+            <option value="engagement">Engagement score ready</option>
           </select>
         </label>
         <label>
@@ -1894,6 +1957,7 @@ onBeforeUnmount(() => {
           <h3>{{ selectedOrgNode.label }}</h3>
           <p class="subtle">ID: {{ selectedOrgNode.id }}</p>
           <p><strong>Dept:</strong> {{ selectedOrgNode.department || '—' }}</p>
+          <p><strong>Sub-dept:</strong> {{ selectedOrgNode.subDepartment || '—' }}</p>
           <p><strong>Title:</strong> {{ selectedOrgNode.title || '—' }}</p>
           <p><strong>Email:</strong> {{ selectedOrgNode.email || '—' }}</p>
           <p><strong>Direct reports:</strong> {{ selectedOrgNode.directReports ?? 0 }}</p>
@@ -1920,6 +1984,18 @@ onBeforeUnmount(() => {
             </ul>
           </div>
         </template>
+
+        <div v-if="orgColorMode === 'engagement'" class="org-legend">
+          <strong>Engagement color scale</strong>
+          <ul>
+            <li class="org-legend-row"><span class="org-legend-dot" style="background-color: #ef4444"></span><span>Low (&lt;4)</span></li>
+            <li class="org-legend-row"><span class="org-legend-dot" style="background-color: #f59e0b"></span><span>Mixed (4-5.9)</span></li>
+            <li class="org-legend-row"><span class="org-legend-dot" style="background-color: #84cc16"></span><span>Good (6-7.9)</span></li>
+            <li class="org-legend-row"><span class="org-legend-dot" style="background-color: #22c55e"></span><span>High (8+)</span></li>
+            <li class="org-legend-row"><span class="org-legend-dot" style="background-color: #94a3b8"></span><span>No score yet</span></li>
+          </ul>
+          <p class="subtle">Engagement coloring is wired for future node metrics; current org data may show gray until scores are joined.</p>
+        </div>
 
         <div v-if="radialDepartmentLegend.length" class="org-legend">
           <strong>Department legend</strong>

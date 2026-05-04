@@ -47,7 +47,7 @@ Filters are available in the UI for:
 - Manager question CSV: from Answers Export, set Answered from/to and use "Manager question CSV" to download one row per manager/question with 5+ respondents, English question text, hierarchy lookup columns, respondent count, and average score
 - Scores contexts: grade, impact, time range, department/sub-department (employee-scoped)
 - Scores by driver: driver ID, grade, time range, department/sub-department (employee-scoped)
-- Org Map Explorer: employee graph from manager relationships with search + zoom + detail panel
+- Org Map Explorer: employee graph from manager relationships with search, department/sub-department filters, a People org preset, zoom, detail panel, and a metric-coloring scaffold for future engagement overlays
 - Employee Birthdays: month/day birthday list grouped by department (year intentionally omitted)
 
 ## Configuration

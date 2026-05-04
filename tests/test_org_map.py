@@ -44,3 +44,13 @@ def test_build_org_map_payload_orphan_detection():
     payload = build_org_map_payload(employees)
     assert payload["stats"]["orphans"] == 1
     assert payload["anomalies"]["orphans"][0]["id"] == "10"
+
+
+def test_org_map_filter_query_accepts_people_subdepartment():
+    from peakon_api.main import _employee_filter_query
+
+    query = _employee_filter_query("General and Administrative", "People", None)
+
+    assert "$and" in query
+    assert any("attributes.Department" in option for option in query["$and"][0]["$or"])
+    assert any("attributes.Sub-Department" in option for option in query["$and"][1]["$or"])
