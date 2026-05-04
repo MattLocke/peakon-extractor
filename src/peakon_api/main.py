@@ -333,6 +333,17 @@ def _employee_name(employee: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _employee_identifier(employee: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not employee:
+        return None
+    attrs = employee.get("attributes") or {}
+    for key in ("identifier", "Identifier"):
+        value = attrs.get(key)
+        if value is not None and str(value).strip() != "":
+            return str(value).strip()
+    return None
+
+
 def _employee_department(employee: Dict[str, Any]) -> Optional[str]:
     attrs = employee.get("attributes") or {}
     for key in ("Department", "department"):
@@ -910,6 +921,19 @@ def export_manager_question_csv(
     )
     employees_by_id = {str(employee.get("_id")): employee for employee in employees}
 
+    manager_lookup_ids: set[Any] = set()
+    for employee in employees:
+        mgr_id = _employee_manager_id(employee)
+        for lookup_id in _as_lookup_ids(mgr_id):
+            manager_lookup_ids.add(lookup_id)
+    manager_docs = list(
+        db.employees.find(
+            {"_id": {"$in": list(manager_lookup_ids)}},
+            {"_id": 1, "attributes": 1},
+        )
+    ) if manager_lookup_ids else []
+    manager_docs_by_id = {str(manager.get("_id")): manager for manager in manager_docs}
+
     driver_ids = {_answer_driver_id(answer) for answer in answers if _answer_driver_id(answer) not in (None, "")}
     question_ids = {answer.get("attributes", {}).get("questionId") for answer in answers if answer.get("attributes", {}).get("questionId") not in (None, "")}
     catalog = _driver_lookup(db, driver_ids, question_ids)
@@ -962,8 +986,9 @@ def export_manager_question_csv(
             continue
         scores = data["scores"]
         avg_score = round(sum(scores) / len(scores), 2) if scores else ""
+        manager_identifier = _employee_identifier(manager_docs_by_id.get(str(mgr_id))) or mgr_id
         rows.append([
-            mgr_id,
+            manager_identifier,
             start_date,
             end_date,
             category,

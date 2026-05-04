@@ -43,6 +43,13 @@ def manager_employee(emp_id, manager_id):
     }
 
 
+def employee_doc(emp_id, identifier=None):
+    attrs = {}
+    if identifier is not None:
+        attrs["identifier"] = identifier
+    return {"_id": emp_id, "attributes": attrs, "relationships": {}}
+
+
 def answer(answer_id, emp_id, question_id, score, text, driver_id=1527181):
     return {
         "_id": answer_id,
@@ -67,7 +74,11 @@ def test_manager_question_csv_groups_by_manager_question_and_suppresses_small_gr
         answer(200 + i, i, 9001, 10, "My manager supports me")
         for i in range(6, 10)
     ]
-    employees = [manager_employee(i, 500) for i in range(1, 6)] + [manager_employee(i, 501) for i in range(6, 10)]
+    employees = (
+        [manager_employee(i, 500) for i in range(1, 6)]
+        + [manager_employee(i, 501) for i in range(6, 10)]
+        + [employee_doc(500, "MGR-500-IDENTIFIER"), employee_doc(501, "MGR-501-IDENTIFIER")]
+    )
     catalog = [{"_id": 1527181, "category": "Engagement", "driver": "Management Support", "subdriver": "Coaching"}]
     monkeypatch.setattr(main, "get_db", lambda: FakeDb(answers, employees, catalog))
 
@@ -75,7 +86,7 @@ def test_manager_question_csv_groups_by_manager_question_and_suppresses_small_gr
     rows = list(csv.DictReader(io.StringIO(response.body.decode())))
 
     assert len(rows) == 1
-    assert rows[0]["managerId"] == "500"
+    assert rows[0]["managerId"] == "MGR-500-IDENTIFIER"
     assert rows[0]["questionId"] == "9001"
     assert rows[0]["questionText"] == "My manager supports me"
     assert rows[0]["respondentCount"] == "5"
